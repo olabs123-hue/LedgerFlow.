@@ -146,20 +146,39 @@ def transfer(body: TransferRequest, user: Annotated[User, Depends(get_user)], db
     if recipient_email == user.email:
         raise HTTPException(400, "Cannot transfer to yourself")
     request_hash = hashlib.sha256(json.dumps({"email": recipient_email, "amount": body.amount_cents}, sort_keys=True).encode()).hexdigest()
-    # End the read transaction opened by authentication before acquiring write locks.
+    # Cache scalar identifiers before rollback: ORM instances expire after rollback.
+    sender_user_id = user.id
+    recipient_id = db.scalar(
+        select(Account.id).join(User).where(User.email == recipient_email)
+    )
+    if recipient_id is None:
+        raise HTTPException(404, "Recipient not found")
+    sender_id = db.scalar(select(Account.id).where(Account.user_id == sender_user_id))
     db.rollback()
-    # Lock the sender's account first: concurrent requests from the same sender serialize,
-    # ensuring that a retry cannot race ahead of its original request.
+    # Acquire locks in the same order for every transfer, preventing AB/BA deadlocks.
     with db.begin():
-        sender = db.scalar(select(Account).where(Account.user_id == user.id).with_for_update())
-        previous = db.scalar(select(Transfer).where(Transfer.sender_id == sender.id, Transfer.idempotency_key == idempotency_key))
+        locked = db.scalars(
+            select(Account)
+            .where(Account.id.in_([sender_id, recipient_id]))
+            .order_by(Account.id)
+            .with_for_update()
+        ).all()
+        accounts = {account.id: account for account in locked}
+        sender = accounts[sender_id]
+        recipient = accounts[recipient_id]
+        previous = db.scalar(select(Transfer).where(
+            Transfer.sender_id == sender.id,
+            Transfer.idempotency_key == idempotency_key,
+        ))
         if previous:
             if previous.request_hash != request_hash:
                 raise HTTPException(409, "Idempotency key already used with different request")
-            return TransferResult(transfer_id=previous.id, amount_cents=previous.amount_cents, recipient_email=recipient_email, replayed=True)
-        recipient = db.scalar(select(Account).join(User).where(User.email == recipient_email).with_for_update(of=Account))
-        if not recipient:
-            raise HTTPException(404, "Recipient not found")
+            return TransferResult(
+                transfer_id=previous.id,
+                amount_cents=previous.amount_cents,
+                recipient_email=recipient_email,
+                replayed=True,
+            )
         if sender.balance_cents < body.amount_cents:
             raise HTTPException(400, "Insufficient demo funds")
         sender.balance_cents -= body.amount_cents
@@ -175,8 +194,9 @@ def demo_credit(user: Annotated[User, Depends(get_user)], db: Annotated[Session,
     # Local development feature: disabled by default. Do not enable in public deployment.
     if not DEMO_MODE:
         raise HTTPException(404, "Not found")
+    user_id = user.id
     db.rollback()
     with db.begin():
-        account = db.scalar(select(Account).where(Account.user_id == user.id).with_for_update())
+        account = db.scalar(select(Account).where(Account.user_id == user_id).with_for_update())
         account.balance_cents += 100_000
     return {"credited_cents": 100_000, "warning": "Simulation credits have no monetary value"}
