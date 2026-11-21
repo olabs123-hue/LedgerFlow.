@@ -1,0 +1,31 @@
+# Render Blueprint: staging-only, locked-down API.
+# Uses the existing Render database named ledgerflow-api-staging-db.
+# No financial routes are exposed: only GET /health and GET /ready.
+services:
+  - type: web
+    name: ledgerflow-api-staging
+    runtime: python
+    plan: free
+    region: oregon
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    autoDeploy: false
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: PUBLIC_API_READONLY
+        value: "true"
+      - key: DEMO_MODE
+        value: "false"
+      - key: ALLOW_REGISTRATION
+        value: "false"
+      - key: FRONTEND_ORIGIN
+        value: https://ledgerflow-showcase-olabs123.onrender.com
+      - key: JWT_SECRET
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ledgerflow-api-staging-db
+          property: connectionString
