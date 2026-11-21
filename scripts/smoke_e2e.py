@@ -39,7 +39,7 @@ def wait_for_stack():
             if api_status == 200 and health.get("status") == "ok" and web_status == 200 and "LedgerFlow" in html:
                 print("Frontend and backend reachable through Docker Compose")
                 return
-        except (urllib.error.URLError, TimeoutError, ValueError):
+        except (OSError, TimeoutError, ValueError):
             pass
         time.sleep(2)
     raise AssertionError("Docker stack did not become ready")
