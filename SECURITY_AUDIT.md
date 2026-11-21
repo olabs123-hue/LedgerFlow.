@@ -29,7 +29,7 @@ Consult each latest workflow result; existence of a job does not establish a pas
 | High | Free Render database expires on 21 December 2026. No durable backup/restore/retention plan is in place. | Choose persistent funded DB for any durable use, configure backups and test restoration. Never store actual funds or sensitive customer information. |
 | Medium | No invitation, email verification, password recovery, MFA or user lifecycle policy. | Implement and test before enabling public registration. |
 | Medium | No structured security audit trail and alerting for auth, transfers, privilege changes or anomalous traffic. | Add redacted logs, metrics, alerts and retention policy. |
-| Medium | No database-level balance nonnegative constraints, amount bounds, or immutable/journal balancing enforcement beyond application logic. | Add DB constraints and reconciliation/invariant tests; consider append-only ledger and reconciliation transactions. |
+| Medium | Nonnegative balances, positive transfer amounts, distinct sender/recipient accounts, and nonzero journal entries now have database-level CHECK constraints (revision 0004). However, immutability and aggregate double-entry balancing are still only enforced through application logic and tests. | Add controlled append-only journals, restricted database roles and automated reconciliation checks. |
 | Medium | Input-size limits, request timeouts and protection from resource exhaustion rely on infrastructure defaults. | Configure explicit body limits, worker concurrency limits and trusted proxy timeouts. |
 | Medium | Dependencies use version ranges rather than deterministic locked releases; audits may change when resolver selects new versions. | Generate reviewable Python and npm lock files and run update automation. |
 | Low | Backend uses deprecated FastAPI startup event. | Migrate to lifespan management. |
@@ -45,3 +45,11 @@ Consult each latest workflow result; existence of a job does not establish a pas
 6. A complete production security audit requires scoped threat modeling, manual code review, dependency and infrastructure inspection, penetration testing, monitoring/recovery validation and documented sign-off.
 
 **Verdict:** The locked read-only staging API can be a safe first deployment milestone after validation. The interactive backend **is not approved for unrestricted public production use**.
+
+
+## Deployment verification (22 November 2026)
+
+- A dedicated remote GitHub Actions probe checks the **actual deployed** Render API with `GET /health` and `GET /ready` returning HTTP 200, and verifies that authentication, registration, account, transfer, demo-credit and documentation routes return HTTP 404.
+- The latest passing probe: https://github.com/olabs123-hue/LedgerFlow./actions/runs/44963630729
+- Migration `0004_ledger_checks` adds DB-enforced CHECK constraints and is validated against disposable PostgreSQL in CI. These changes must be deployed separately to Render; a GitHub commit alone does not apply migrations to staging.
+- Neither the live API probe nor automated security scanner is a complete professional penetration test or formal sign-off.
