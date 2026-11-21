@@ -28,3 +28,10 @@ def test_production_disables_public_registration_funding_and_docs():
         assert response.headers["x-frame-options"] == "DENY"
         assert response.headers["cache-control"] == "no-store"
         assert "strict-transport-security" in response.headers
+        # Exercise the database-backed throttle in the migrated schema.
+        unknown = {"email": "nonexistent@example.com", "password": "not-a-real-password-123"}
+        for _ in range(5):
+            assert client.post("/auth/login", json=unknown).status_code == 401
+        blocked = client.post("/auth/login", json=unknown)
+        assert blocked.status_code == 429
+        assert int(blocked.headers["retry-after"]) > 0
