@@ -88,3 +88,11 @@ Set `DATABASE_URL` and `JWT_SECRET` securely in the environment first. The initi
 - JWTs expire after one hour in production; development tokens expire after eight hours.
 
 **Not yet suitable for an exposed public API.** Additional controls still needed include independent IP-based abuse protection at the reverse proxy, registration/invitation flow, session revocation and secure token transport, secure credential recovery, audit logging, dependency security checks, and staging security tests. Do not deploy the live backend publicly until those are implemented and verified. The separately hosted browser-only showcase remains the recommended recruiter-facing URL.
+
+
+## Session revocation (migration 0003)
+Each successful sign-in now receives a unique JWT `jti` identifier. `POST /auth/logout` stores its identifier in the `revoked_tokens` table until the original token expiration. Every protected endpoint rejects tokens found in that table, including replays after logout. Other independently issued session tokens remain valid. The web client invokes the logout endpoint and immediately clears its local session.
+
+Apply `alembic upgrade head` before running a production-mode API with the new schema. A housekeeping command `cd backend && python prune_revoked_tokens.py` can remove expired revocation entries from the current database; schedule this only with trusted operational credentials. Keep JWT signing secrets outside source control.
+
+**Remaining limitations:** The browser client still uses JavaScript-accessible session storage for bearer tokens. For a hardened public deployment, use a security-reviewed same-origin session design, HttpOnly/Secure/SameSite cookies with CSRF defenses if appropriate, and a proper invitation/registration flow. Failed-login throttling is per email identifier, not a substitute for IP/routing abuse defenses or network access controls. The backend is intentionally not published as a public service yet.
