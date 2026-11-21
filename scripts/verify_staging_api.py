@@ -8,10 +8,11 @@ import os
 import time
 import urllib.error
 import urllib.request
+import urllib.parse
 
 BASE = os.environ.get("STAGING_API_URL", "").rstrip("/")
 EXPECTED_HOST = "ledgerflow-api-staging-t1yt.onrender.com"
-if not BASE.startswith("https://") or urllib.request.urlparse(BASE).hostname != EXPECTED_HOST:
+if not BASE.startswith("https://") or urllib.parse.urlparse(BASE).hostname != EXPECTED_HOST:
     raise SystemExit(f"Refusing to probe anything other than https://{EXPECTED_HOST}")
 
 def call(method, path):
