@@ -17,7 +17,7 @@ function App(){
  const [message,setMessage]=useState('');const [error,setError]=useState('');
  const refresh=useCallback(async()=>{if(!token)return;try{const [me,history]=await Promise.all([call<Profile>('/me','GET',undefined,token),call<Tx[]>('/transfers','GET',undefined,token)]);setProfile(me);setTxs(history);setError('');}catch(e){setError((e as Error).message);}},[token]);
  useEffect(()=>{void refresh();},[refresh]);
- function logout(){void call('/auth/logout','POST',{},token).catch(()=>{});sessionStorage.removeItem('ledgerflow_token');setToken('');setProfile(null);setTxs([]);}
+ async function logout(){setBusy(true);setMessage('');let confirmed=false;try{await call('/auth/logout','POST',{},token);confirmed=true;}catch{confirmed=false;}finally{sessionStorage.removeItem('ledgerflow_token');setToken('');setProfile(null);setTxs([]);setBusy(false);if(!confirmed)setMessage('Signed out on this device, but server token revocation could not be confirmed.');}}
  async function auth(e:React.FormEvent){e.preventDefault();setBusy(true);setError('');setMessage('');try{
    if(signup){await call('/auth/register','POST',{email,password});setSignup(false);setMessage('Account created. Sign in to continue.');}
    else{const result=await call<{access_token:string}>('/auth/login','POST',{email,password});sessionStorage.setItem('ledgerflow_token',result.access_token);setToken(result.access_token);setPassword('');}
