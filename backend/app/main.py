@@ -11,12 +11,13 @@ from typing import Annotated
 
 import jwt
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, EmailStr, Field
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError, VerificationError
-from sqlalchemy import BigInteger, DateTime, ForeignKey, String, UniqueConstraint, case, create_engine, delete, select
+from sqlalchemy import BigInteger, DateTime, ForeignKey, String, UniqueConstraint, case, create_engine, delete, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, sessionmaker
@@ -27,6 +28,7 @@ DEMO_MODE = os.getenv("DEMO_MODE", "false").lower() == "true"
 APP_ENV = os.getenv("APP_ENV", "development").lower()
 PUBLIC_ORIGIN = os.getenv("FRONTEND_ORIGIN", "http://localhost:5173")
 ALLOW_REGISTRATION = os.getenv("ALLOW_REGISTRATION", "false").lower() == "true"
+PUBLIC_API_READONLY = os.getenv("PUBLIC_API_READONLY", "true" if APP_ENV == "production" else "false").lower() == "true"
 if not SECRET or SECRET == "REPLACE_WITH_A_LONG_RANDOM_SECRET_BEFORE_DEPLOYING" or len(SECRET) < 32:
     raise RuntimeError("Set JWT_SECRET to a secure random string (32+ characters)")
 if APP_ENV not in {"development", "test", "production"}:
@@ -34,6 +36,8 @@ if APP_ENV not in {"development", "test", "production"}:
 if APP_ENV == "production":
     if DEMO_MODE:
         raise RuntimeError("DEMO_MODE cannot be enabled in production")
+    if not PUBLIC_API_READONLY and os.getenv("ALLOW_LIVE_API") != "I_UNDERSTAND_THE_RISK":
+        raise RuntimeError("Public write API requires explicit ALLOW_LIVE_API acknowledgement")
     if len(SECRET) < 48:
         raise RuntimeError("Production JWT_SECRET must have 48+ characters")
     if not DB_URL.startswith("postgresql"):
@@ -137,7 +141,13 @@ app.add_middleware(CORSMiddleware, allow_origins=[PUBLIC_ORIGIN], allow_credenti
 
 @app.middleware("http")
 async def security_headers(request: Request, call_next):
-    response = await call_next(request)
+    # Public release first exposes ONLY liveness/readiness, not user or money-like APIs.
+    if APP_ENV == "production" and PUBLIC_API_READONLY and (
+        request.method != "GET" or request.url.path not in ("/health", "/ready")
+    ):
+        response = JSONResponse({"detail": "Not found"}, status_code=404)
+    else:
+        response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "no-referrer"
@@ -174,6 +184,15 @@ def get_user(token: Annotated[HTTPAuthorizationCredentials, Depends(auth_scheme)
 @app.get("/health")
 def health():
     return {"status": "ok", "simulation": True}
+
+@app.get("/ready")
+def ready(db: Annotated[Session, Depends(get_db)]):
+    """Database connectivity only. No user records or connection details returned."""
+    try:
+        db.execute(text("SELECT 1")).scalar_one()
+    except Exception:
+        raise HTTPException(503, "Database unavailable")
+    return {"status": "ready", "simulation": True}
 
 @app.post("/auth/register", status_code=201)
 def register(body: Credentials, db: Annotated[Session, Depends(get_db)]):
