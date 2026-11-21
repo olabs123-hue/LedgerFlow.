@@ -49,6 +49,20 @@ jobs:
         with:
           python-version: '3.13'
       - run: pip install -r requirements.txt
+      - name: Apply migrations on fresh PostgreSQL
+        run: alembic upgrade head
+      - name: Assert migrated schema and revision
+        run: |
+          python - <<'PY'
+          from sqlalchemy import create_engine, inspect, text
+          import os
+          engine = create_engine(os.environ['DATABASE_URL'])
+          tables = set(inspect(engine).get_table_names())
+          assert {'users','accounts','transfers','journal_entries','alembic_version'} <= tables, tables
+          with engine.connect() as conn:
+              assert conn.execute(text('SELECT version_num FROM alembic_version')).scalar_one() == '0001_initial_schema'
+          print('Alembic migration schema verified')
+          PY
       - run: PYTHONPATH=. pytest -q tests/test_pg_integration.py
   frontend:
     runs-on: ubuntu-latest
