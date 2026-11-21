@@ -17,7 +17,7 @@ def test_production_disables_public_registration_funding_and_docs():
             "/auth/register",
             json={"email": "not-registered@example.com", "password": "secure-password-123"},
         )
-        assert registration.status_code == 403, registration.text
+        assert registration.status_code == 404, registration.text
         assert client.get("/docs").status_code == 404
         assert client.get("/openapi.json").status_code == 404
         # Funding endpoint stays unavailable even when a request supplies a token.
