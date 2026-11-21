@@ -9,8 +9,8 @@ import urllib.error
 import urllib.request
 import uuid
 
-API = "http://localhost:8000"
-WEB = "http://localhost:5173"
+API = "http://127.0.0.1:8000"
+WEB = "http://127.0.0.1:5173"
 
 
 def request(url, method="GET", body=None, token=None, key=None):
@@ -32,17 +32,27 @@ def request(url, method="GET", body=None, token=None, key=None):
 
 
 def wait_for_stack():
-    for attempt in range(90):
+    last = None
+    for attempt in range(45):
         try:
             api_status, health = request(API + "/health")
             web_status, html = request(WEB)
+            last = {
+                "api": api_status,
+                "health": health,
+                "frontend": web_status,
+                "html_contains_ledgerflow": "LedgerFlow" in html,
+                "html_start": html[:130],
+            }
             if api_status == 200 and health.get("status") == "ok" and web_status == 200 and "LedgerFlow" in html:
-                print("Frontend and backend reachable through Docker Compose")
+                print("Frontend and backend reachable through Docker Compose", flush=True)
                 return
-        except (OSError, TimeoutError, ValueError):
-            pass
+        except (OSError, TimeoutError, ValueError) as error:
+            last = repr(error)
+        if attempt % 5 == 0:
+            print(f"Readiness attempt {attempt + 1}: {last}", flush=True)
         time.sleep(2)
-    raise AssertionError("Docker stack did not become ready")
+    raise AssertionError(f"Docker stack did not become ready; last observation: {last}")
 
 
 def main():
