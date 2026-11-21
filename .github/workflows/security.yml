@@ -1,0 +1,44 @@
+name: Security Audit
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install backend dependencies and security scanners
+        run: |
+          python -m pip install -r requirements.txt
+          python -m pip install pip-audit bandit
+      - name: Audit actually installed Python dependencies
+        run: python -m pip_audit
+      - name: Static Python code scan (medium/high findings)
+        run: bandit -r app -ll
+
+  javascript:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Resolve frontend dependencies
+        run: npm install --ignore-scripts
+      - name: Audit production dependency tree
+        run: npm audit --omit=dev --audit-level=high
