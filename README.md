@@ -31,6 +31,18 @@ React 18, TypeScript, Vite; FastAPI, SQLAlchemy, PostgreSQL; Docker Compose; JWT
 Run `cd backend && pip install -r requirements.txt && PYTHONPATH=. pytest -q`. Frontend build command: `cd frontend && npm install && npm run build`.
 
 ## Limitations and verification
-This is a learning prototype and should not be deployed publicly as-is. DEMO_MODE provides unrestricted fictional credits and must remain off in public environments. Missing production controls include email verification, rate limiting, migrations, MFA, session revocation, and audit/security hardening. Concurrent cross-transfers may deadlock because locks are not acquired in canonical account order.
+This is a learning prototype and should not be deployed publicly as-is. DEMO_MODE provides unrestricted fictional credits and must remain off in public environments. Missing production controls include email verification, rate limiting, migrations, MFA, session revocation, and audit/security hardening. Account rows are now acquired in canonical ID order to mitigate opposing-transfer deadlocks; concurrency behavior must still be validated through PostgreSQL CI.
 
-On 2026-11-21 Python compilation and two SQLite API smoke tests passed. Frontend dependency installation/build and Docker/PostgreSQL integration and concurrency tests were **not verified** in the available runtime. Do not claim production readiness or PostgreSQL concurrency correctness until independently tested.
+On 2026-11-21 Python compilation, two SQLite API smoke tests and the frontend production build passed in GitHub Actions. A separate PostgreSQL CI job now exercises concurrent idempotent retries, opposing transfers, and error-path balance preservation. Consult the latest [CI run](../../actions) for its actual result; do not claim PostgreSQL correctness if that job is failing. No hosted public demo is deployed; no production-readiness claims are made.
+
+
+## PostgreSQL concurrency verification
+The `postgres-integration` GitHub Actions job provisions a temporary PostgreSQL 16 service and runs `backend/tests/test_pg_integration.py` in an isolated Python process. It covers:
+- 12 concurrent submissions using the **same** idempotency key (expect exactly one journaled transfer).
+- 20 simultaneous transfers in opposite directions across two accounts (expect no deadlocks).
+- Error cases that must not mutate balances or add journal entries.
+
+These tests are reproducible integration checks, **not** a production load test or end-to-end deployment validation.
+
+## Security and deployment note
+This is a local-only demonstration. Do not publish the API with `DEMO_MODE=true` or a placeholder JWT secret. A public deployment will require rate limiting, proper secrets, API migrations, operations monitoring, secure cookies/token handling, and a separate security review.
