@@ -58,3 +58,28 @@ def test_authentication_and_validation():
         assert client.post('/transfers', json={'recipient_email':'nobody@example.com','amount_cents':100}, headers=headers).status_code == 404
     Base.metadata.drop_all(engine)
     # Keep the SQLite file until all pooled connections are released at process exit.
+
+
+def test_failed_login_throttling_and_reset():
+    Base.metadata.drop_all(engine)
+    with TestClient(app) as client:
+        email = 'limited@example.com'
+        password = 'correct-password-123'
+        assert client.post('/auth/register', json={'email':email, 'password':password}).status_code == 201
+        for _ in range(5):
+            result = client.post('/auth/login', json={'email':email, 'password':'wrong-password-123'})
+            assert result.status_code == 401, result.text
+        locked = client.post('/auth/login', json={'email':email, 'password':password})
+        assert locked.status_code == 429, locked.text
+        assert int(locked.headers['Retry-After']) > 0
+        # Simulate window expiration without sleeping in the test.
+        from sqlalchemy import update
+        from app.main import LoginAttempt
+        with SessionLocal() as db:
+            db.execute(update(LoginAttempt).values(last_failure_epoch=0))
+            db.commit()
+        assert client.post('/auth/login', json={'email':email, 'password':password}).status_code == 200
+        with SessionLocal() as db:
+            from sqlalchemy import func
+            assert db.scalar(select(func.count()).select_from(LoginAttempt)) == 0
+    Base.metadata.drop_all(engine)
