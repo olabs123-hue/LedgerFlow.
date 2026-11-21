@@ -15,7 +15,7 @@ jobs:
           python-version: '3.13'
       - run: pip install -r requirements.txt
       - run: python -m compileall app
-      - run: PYTHONPATH=. pytest -q tests/test_api.py
+      - run: PYTHONPATH=. pytest -q tests/test_api.py tests/test_production_guardrails.py
         env:
           DATABASE_URL: sqlite+pysqlite:///./ledgerflow_test.sqlite
           JWT_SECRET: integration-test-secret-string-32-bytes-minimum-only
