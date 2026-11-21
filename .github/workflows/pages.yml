@@ -39,6 +39,8 @@ jobs:
           grep -q 'LedgerFlow' dist/index.html
           test -f dist/assets/$(find dist/assets -maxdepth 1 -name '*.js' -printf '%f\n' | head -1)
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: frontend/dist
