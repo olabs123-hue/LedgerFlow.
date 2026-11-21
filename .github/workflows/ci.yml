@@ -15,7 +15,41 @@ jobs:
           python-version: '3.13'
       - run: pip install -r requirements.txt
       - run: python -m compileall app
-      - run: PYTHONPATH=. pytest -q
+      - run: PYTHONPATH=. pytest -q tests/test_api.py
+        env:
+          DATABASE_URL: sqlite+pysqlite:///./ledgerflow_test.sqlite
+          JWT_SECRET: integration-test-secret-string-32-bytes-minimum-only
+          DEMO_MODE: 'true'
+  postgres-integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: ledgerflow_test
+          POSTGRES_USER: ledgerflow
+          POSTGRES_PASSWORD: test_only_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ledgerflow -d ledgerflow_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DATABASE_URL: postgresql+psycopg://ledgerflow:test_only_password@localhost:5432/ledgerflow_test
+      JWT_SECRET: integration-test-secret-string-32-bytes-minimum-only
+      DEMO_MODE: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install -r requirements.txt
+      - run: PYTHONPATH=. pytest -q tests/test_pg_integration.py
   frontend:
     runs-on: ubuntu-latest
     defaults:
