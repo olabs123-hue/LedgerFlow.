@@ -1,0 +1,25 @@
+name: Verify Live Read-Only API
+
+on:
+  push:
+    paths:
+      - scripts/verify_staging_api.py
+      - .github/workflows/verify-staging.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  staging-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Verify real external staging API responses
+        env:
+          STAGING_API_URL: https://ledgerflow-api-staging-t1yt.onrender.com
+        run: python scripts/verify_staging_api.py
