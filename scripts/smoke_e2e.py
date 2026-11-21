@@ -33,7 +33,14 @@ def request(url, method="GET", body=None, token=None, key=None):
                     raise ValueError(f"Non-JSON API response from {url}: HTTP {response.status}, body={data[:160]!r}") from exc
             return response.status, data.decode()
     except urllib.error.HTTPError as error:
-        return error.code, json.loads(error.read().decode())
+        raw = error.read().decode(errors="replace")
+        if url.startswith(API):
+            try:
+                return error.code, json.loads(raw)
+            except json.JSONDecodeError:
+                return error.code, {"detail": raw[:250]}
+        return error.code, raw
+
 
 
 def wait_for_stack():
