@@ -56,6 +56,7 @@ def main():
         print(f"PASS GET {path}: HTTP {status}, secure response headers")
 
     blocked = (
+        ("GET", "/"),
         ("GET", "/docs"),
         ("GET", "/openapi.json"),
         ("GET", "/me"),
