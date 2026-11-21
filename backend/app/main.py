@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
 import jwt
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, EmailStr, Field
@@ -20,8 +20,22 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, rela
 DB_URL = os.getenv("DATABASE_URL", "postgresql+psycopg://ledgerflow:ledgerflow@localhost:5433/ledgerflow")
 SECRET = os.getenv("JWT_SECRET", "")
 DEMO_MODE = os.getenv("DEMO_MODE", "false").lower() == "true"
+APP_ENV = os.getenv("APP_ENV", "development").lower()
+PUBLIC_ORIGIN = os.getenv("FRONTEND_ORIGIN", "http://localhost:5173")
+ALLOW_REGISTRATION = os.getenv("ALLOW_REGISTRATION", "false").lower() == "true"
 if not SECRET or SECRET == "REPLACE_WITH_A_LONG_RANDOM_SECRET_BEFORE_DEPLOYING" or len(SECRET) < 32:
     raise RuntimeError("Set JWT_SECRET to a secure random string (32+ characters)")
+if APP_ENV not in {"development", "test", "production"}:
+    raise RuntimeError("APP_ENV must be development, test, or production")
+if APP_ENV == "production":
+    if DEMO_MODE:
+        raise RuntimeError("DEMO_MODE cannot be enabled in production")
+    if len(SECRET) < 48:
+        raise RuntimeError("Production JWT_SECRET must have 48+ characters")
+    if not DB_URL.startswith("postgresql"):
+        raise RuntimeError("Production requires PostgreSQL")
+    if not PUBLIC_ORIGIN.startswith("https://"):
+        raise RuntimeError("Production FRONTEND_ORIGIN must use HTTPS")
 engine = create_engine(DB_URL, pool_pre_ping=True)
 SessionLocal = sessionmaker(engine, expire_on_commit=False)
 password_hasher = PasswordHasher()
@@ -76,12 +90,24 @@ class TransferResult(BaseModel):
     recipient_email: str
     replayed: bool
 
-app = FastAPI(title="LedgerFlow API", version="0.1.0", description="Simulation only — not a payment processor")
-app.add_middleware(CORSMiddleware, allow_origins=[os.getenv("FRONTEND_ORIGIN", "http://localhost:5173")], allow_credentials=False, allow_methods=["GET", "POST"], allow_headers=["Authorization", "Content-Type", "Idempotency-Key"])
+app = FastAPI(title="LedgerFlow API", version="0.1.0", description="Simulation only — not a payment processor", docs_url=None if APP_ENV == "production" else "/docs", redoc_url=None if APP_ENV == "production" else "/redoc", openapi_url=None if APP_ENV == "production" else "/openapi.json")
+app.add_middleware(CORSMiddleware, allow_origins=[PUBLIC_ORIGIN], allow_credentials=False, allow_methods=["GET", "POST"], allow_headers=["Authorization", "Content-Type", "Idempotency-Key"])
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Cache-Control"] = "no-store"
+    if APP_ENV == "production":
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return response
 
 @app.on_event("startup")
 def startup():
-    Base.metadata.create_all(engine)  # Development only. Production should use migrations.
+    if APP_ENV != "production":
+        Base.metadata.create_all(engine)  # Development only; production requires migrations.
 
 def get_db():
     with SessionLocal() as db:
@@ -103,6 +129,8 @@ def health():
 
 @app.post("/auth/register", status_code=201)
 def register(body: Credentials, db: Annotated[Session, Depends(get_db)]):
+    if APP_ENV == "production" and not ALLOW_REGISTRATION:
+        raise HTTPException(403, "Public registration is disabled")
     email = str(body.email).lower()
     if db.scalar(select(User.id).where(User.email == email)) is not None:
         raise HTTPException(409, "Email already registered")
@@ -126,7 +154,7 @@ def login(body: Credentials, db: Annotated[Session, Depends(get_db)]):
         password_hasher.verify(user.password_hash, body.password)
     except (VerifyMismatchError, VerificationError):
         raise HTTPException(401, "Invalid credentials")
-    token = jwt.encode({"sub": str(user.id), "exp": datetime.now(timezone.utc) + timedelta(hours=8)}, SECRET, algorithm="HS256")
+    token = jwt.encode({"sub": str(user.id), "exp": datetime.now(timezone.utc) + timedelta(hours=1 if APP_ENV == "production" else 8)}, SECRET, algorithm="HS256")
     return {"access_token": token, "token_type": "bearer"}
 
 @app.get("/me")
