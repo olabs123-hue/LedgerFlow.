@@ -63,3 +63,28 @@ Set `APP_ENV=production` for a real API deployment. The backend refuses to start
 Production disables API documentation, sets security-related response headers, issues shorter-lived JWTs, and rejects signups unless `ALLOW_REGISTRATION=true` is explicitly configured. Database auto-creation is disabled in production, so schema migrations must be built before a real API release. **These are limited guardrails, not a comprehensive security assessment.**
 
 The backend is deliberately **not** deployed with GitHub Pages. Public API deployment remains blocked pending migration tooling, login rate limiting, session security review, error logging/monitoring, and hosting credentials.
+
+
+## Versioned database migrations
+Schema changes now live in `backend/migrations/versions/` and are managed by Alembic rather than by changing tables on application startup in production.
+
+**Apply migrations before starting a production backend:**
+```bash
+cd backend
+python -m pip install -r requirements.txt
+alembic upgrade head
+alembic current
+```
+
+Set `DATABASE_URL` and `JWT_SECRET` securely in the environment first. The initial revision creates the ledger tables, and the next revision adds the `login_attempts` table. The PostgreSQL CI job creates a fresh temporary database, executes all migrations, verifies the current revision, and exercises the ledger concurrency tests.
+
+**Existing database caution:** These initial migrations are designed for a *new* database. An existing populated database created using `Base.metadata.create_all()` requires a carefully verified baseline/stamp strategy and backup. Do not run the initial `upgrade` blindly against an existing schema.
+
+## Authentication defenses (limited scope)
+- Failed password attempts are recorded in the database using a SHA-256 email identifier; this avoids storing email addresses in the counter table.
+- Five unsuccessful attempts within 15 minutes cause subsequent attempts targeting that identifier to return HTTP 429 with a `Retry-After` header.
+- Successful logins reset that identifier's failed-login counter.
+- Production defaults to `ALLOW_REGISTRATION=false`; demonstration funding is rejected at production startup.
+- JWTs expire after one hour in production; development tokens expire after eight hours.
+
+**Not yet suitable for an exposed public API.** Additional controls still needed include independent IP-based abuse protection at the reverse proxy, registration/invitation flow, session revocation and secure token transport, secure credential recovery, audit logging, dependency security checks, and staging security tests. Do not deploy the live backend publicly until those are implemented and verified. The separately hosted browser-only showcase remains the recommended recruiter-facing URL.
