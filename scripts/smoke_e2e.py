@@ -26,7 +26,12 @@ def request(url, method="GET", body=None, token=None, key=None):
     try:
         with urllib.request.urlopen(req, timeout=10) as response:
             data = response.read()
-            return response.status, json.loads(data.decode()) if url.startswith(API) else data.decode()
+            if url.startswith(API):
+                try:
+                    return response.status, json.loads(data.decode())
+                except json.JSONDecodeError as exc:
+                    raise ValueError(f"Non-JSON API response from {url}: HTTP {response.status}, body={data[:160]!r}") from exc
+            return response.status, data.decode()
     except urllib.error.HTTPError as error:
         return error.code, json.loads(error.read().decode())
 
