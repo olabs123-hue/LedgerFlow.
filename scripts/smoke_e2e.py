@@ -15,7 +15,7 @@ WEB = "http://127.0.0.1:5173"
 
 def request(url, method="GET", body=None, token=None, key=None):
     payload = None if body is None else json.dumps(body).encode("utf-8")
-    headers = {"Accept": "application/json"}
+    headers = {"Accept": "application/json" if url.startswith(API) else "text/html"}
     if body is not None:
         headers["Content-Type"] = "application/json"
     if token:
