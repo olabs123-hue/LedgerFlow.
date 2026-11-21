@@ -23,6 +23,9 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, sessionmaker
 
 DB_URL = os.getenv("DATABASE_URL", "postgresql+psycopg://ledgerflow:ledgerflow@localhost:5433/ledgerflow")
+# Render connectionString uses postgresql://; SQLAlchemy should select installed psycopg3.
+if DB_URL.startswith("postgresql://"):
+    DB_URL = "postgresql+psycopg://" + DB_URL[len("postgresql://"):]
 SECRET = os.getenv("JWT_SECRET", "")
 DEMO_MODE = os.getenv("DEMO_MODE", "false").lower() == "true"
 APP_ENV = os.getenv("APP_ENV", "development").lower()
