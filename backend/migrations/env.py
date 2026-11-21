@@ -5,14 +5,14 @@ import os
 from alembic import context
 from sqlalchemy import create_engine, pool
 
-from app.main import Base
+from app.main import Base, DB_URL
 
 config = context.config
 target_metadata = Base.metadata
 
 def offline():
     context.configure(
-        url=os.environ["DATABASE_URL"],
+        url=DB_URL,
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
@@ -21,7 +21,7 @@ def offline():
         context.run_migrations()
 
 def online():
-    engine = create_engine(os.environ["DATABASE_URL"], poolclass=pool.NullPool)
+    engine = create_engine(DB_URL, poolclass=pool.NullPool)
     with engine.connect() as connection:
         context.configure(connection=connection, target_metadata=target_metadata)
         with context.begin_transaction():
