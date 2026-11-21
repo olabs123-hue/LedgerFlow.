@@ -43,7 +43,7 @@ test('register, sign in, fund a demo account, transfer and check history', async
 
   await signIn(bob);
   await expect(page.getByText('Incoming transfer')).toBeVisible();
-  await expect(page.getByText('$12.50')).toBeVisible();
+  await expect(page.getByText('$12.50', { exact: true })).toBeVisible();
 });
 
 test('mobile layout keeps login controls usable', async ({ page, isMobile }) => {
