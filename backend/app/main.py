@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
@@ -14,7 +15,9 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, EmailStr, Field
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError, VerificationError
-from sqlalchemy import BigInteger, DateTime, ForeignKey, String, UniqueConstraint, create_engine, select
+from sqlalchemy import BigInteger, DateTime, ForeignKey, String, UniqueConstraint, case, create_engine, delete, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, sessionmaker
 
 DB_URL = os.getenv("DATABASE_URL", "postgresql+psycopg://ledgerflow:ledgerflow@localhost:5433/ledgerflow")
@@ -75,6 +78,38 @@ class Entry(Base):
     transfer_id: Mapped[int] = mapped_column(ForeignKey("transfers.id"))
     account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"))
     delta_cents: Mapped[int] = mapped_column(BigInteger)
+
+class LoginAttempt(Base):
+    """Database-backed failed-password counter, keyed by email digest."""
+    __tablename__ = "login_attempts"
+    email_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    failures: Mapped[int] = mapped_column(default=0)
+    last_failure_epoch: Mapped[int] = mapped_column(BigInteger, default=0)
+
+LOGIN_LIMIT = 5
+LOGIN_WINDOW_SECONDS = 15 * 60
+
+def _login_key(email: str) -> str:
+    return hashlib.sha256(email.encode("utf-8")).hexdigest()
+
+def _record_failed_login(db: Session, email_hash: str, now: int):
+    """Atomic upsert works across multiple API processes sharing the same database."""
+    insert_fn = pg_insert if db.bind.dialect.name == "postgresql" else sqlite_insert
+    statement = insert_fn(LoginAttempt).values(
+        email_hash=email_hash, failures=1, last_failure_epoch=now
+    )
+    statement = statement.on_conflict_do_update(
+        index_elements=["email_hash"],
+        set_={
+            "failures": case(
+                (LoginAttempt.last_failure_epoch <= now - LOGIN_WINDOW_SECONDS, 1),
+                else_=LoginAttempt.failures + 1,
+            ),
+            "last_failure_epoch": now,
+        },
+    )
+    db.execute(statement)
+    db.commit()
 
 class Credentials(BaseModel):
     email: EmailStr
@@ -147,13 +182,25 @@ def register(body: Credentials, db: Annotated[Session, Depends(get_db)]):
 
 @app.post("/auth/login")
 def login(body: Credentials, db: Annotated[Session, Depends(get_db)]):
-    user = db.scalar(select(User).where(User.email == str(body.email).lower()))
-    if user is None:
+    email = str(body.email).lower()
+    now = int(time.time())
+    key = _login_key(email)
+    attempts = db.get(LoginAttempt, key)
+    if attempts and attempts.failures >= LOGIN_LIMIT and now - attempts.last_failure_epoch < LOGIN_WINDOW_SECONDS:
+        retry = max(1, LOGIN_WINDOW_SECONDS - (now - attempts.last_failure_epoch))
+        raise HTTPException(429, "Too many unsuccessful login attempts", headers={"Retry-After": str(retry)})
+    user = db.scalar(select(User).where(User.email == email))
+    valid = False
+    if user is not None:
+        try:
+            valid = password_hasher.verify(user.password_hash, body.password)
+        except (VerifyMismatchError, VerificationError):
+            pass
+    if not valid:
+        _record_failed_login(db, key, now)
         raise HTTPException(401, "Invalid credentials")
-    try:
-        password_hasher.verify(user.password_hash, body.password)
-    except (VerifyMismatchError, VerificationError):
-        raise HTTPException(401, "Invalid credentials")
+    db.execute(delete(LoginAttempt).where(LoginAttempt.email_hash == key))
+    db.commit()
     token = jwt.encode({"sub": str(user.id), "exp": datetime.now(timezone.utc) + timedelta(hours=1 if APP_ENV == "production" else 8)}, SECRET, algorithm="HS256")
     return {"access_token": token, "token_type": "bearer"}
 
