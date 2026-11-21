@@ -17,7 +17,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, EmailStr, Field
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError, VerificationError
-from sqlalchemy import BigInteger, DateTime, ForeignKey, String, UniqueConstraint, case, create_engine, delete, select, text
+from sqlalchemy import BigInteger, CheckConstraint, DateTime, ForeignKey, String, UniqueConstraint, case, create_engine, delete, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, sessionmaker
@@ -64,6 +64,7 @@ class User(Base):
 
 class Account(Base):
     __tablename__ = "accounts"
+    __table_args__ = (CheckConstraint("balance_cents >= 0", name="ck_accounts_nonnegative_balance"),)
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), unique=True)
     balance_cents: Mapped[int] = mapped_column(BigInteger, default=0)
@@ -71,7 +72,11 @@ class Account(Base):
 
 class Transfer(Base):
     __tablename__ = "transfers"
-    __table_args__ = (UniqueConstraint("sender_id", "idempotency_key"),)
+    __table_args__ = (
+        UniqueConstraint("sender_id", "idempotency_key"),
+        CheckConstraint("amount_cents > 0", name="ck_transfers_positive_amount"),
+        CheckConstraint("sender_id <> recipient_id", name="ck_transfers_distinct_accounts"),
+    )
     id: Mapped[int] = mapped_column(primary_key=True)
     sender_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"))
     recipient_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"))
@@ -82,6 +87,7 @@ class Transfer(Base):
 
 class Entry(Base):
     __tablename__ = "journal_entries"
+    __table_args__ = (CheckConstraint("delta_cents <> 0", name="ck_journal_nonzero_entry"),)
     id: Mapped[int] = mapped_column(primary_key=True)
     transfer_id: Mapped[int] = mapped_column(ForeignKey("transfers.id"))
     account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"))
