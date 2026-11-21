@@ -64,6 +64,14 @@ jobs:
           print('Alembic migration schema verified')
           PY
       - run: PYTHONPATH=. pytest -q tests/test_pg_integration.py
+      - name: Verify actual production-mode HTTP restrictions
+        env:
+          APP_ENV: production
+          DEMO_MODE: 'false'
+          ALLOW_REGISTRATION: 'false'
+          JWT_SECRET: 'test-production-secret-with-more-than-48-characters-not-for-deployment'
+          FRONTEND_ORIGIN: https://example.org
+        run: PYTHONPATH=. pytest -q tests/test_production_runtime.py
   frontend:
     runs-on: ubuntu-latest
     defaults:
