@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import secrets
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
@@ -79,6 +80,12 @@ class Entry(Base):
     account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"))
     delta_cents: Mapped[int] = mapped_column(BigInteger)
 
+class RevokedToken(Base):
+    """Server-side revocation of individual signed access tokens."""
+    __tablename__ = "revoked_tokens"
+    jti: Mapped[str] = mapped_column(String(64), primary_key=True)
+    expires_at_epoch: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
 class LoginAttempt(Base):
     """Database-backed failed-password counter, keyed by email digest."""
     __tablename__ = "login_attempts"
@@ -150,9 +157,15 @@ def get_db():
 
 def get_user(token: Annotated[HTTPAuthorizationCredentials, Depends(auth_scheme)], db: Annotated[Session, Depends(get_db)]) -> User:
     try:
-        payload = jwt.decode(token.credentials, SECRET, algorithms=["HS256"], options={"require": ["sub", "exp"]})
+        payload = jwt.decode(
+            token.credentials, SECRET, algorithms=["HS256"],
+            options={"require": ["sub", "exp", "jti"]},
+        )
+        jti = str(payload["jti"])
+        if not jti or db.get(RevokedToken, jti) is not None:
+            raise HTTPException(401, "Invalid or revoked token")
         user = db.get(User, int(payload["sub"]))
-    except (jwt.PyJWTError, ValueError, TypeError):
+    except (jwt.PyJWTError, ValueError, TypeError, KeyError):
         user = None
     if user is None:
         raise HTTPException(401, "Invalid or expired token")
@@ -201,8 +214,24 @@ def login(body: Credentials, db: Annotated[Session, Depends(get_db)]):
         raise HTTPException(401, "Invalid credentials")
     db.execute(delete(LoginAttempt).where(LoginAttempt.email_hash == key))
     db.commit()
-    token = jwt.encode({"sub": str(user.id), "exp": datetime.now(timezone.utc) + timedelta(hours=1 if APP_ENV == "production" else 8)}, SECRET, algorithm="HS256")
+    token = jwt.encode({
+        "sub": str(user.id),
+        "jti": secrets.token_urlsafe(24),
+        "exp": datetime.now(timezone.utc) + timedelta(hours=1 if APP_ENV == "production" else 8),
+    }, SECRET, algorithm="HS256")
     return {"access_token": token, "token_type": "bearer"}
+
+@app.post("/auth/logout")
+def logout(
+    user: Annotated[User, Depends(get_user)],
+    token: Annotated[HTTPAuthorizationCredentials, Depends(auth_scheme)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    """Revoke only this access token. Other devices can remain signed in."""
+    payload = jwt.decode(token.credentials, SECRET, algorithms=["HS256"])
+    db.add(RevokedToken(jti=str(payload["jti"]), expires_at_epoch=int(payload["exp"])))
+    db.commit()
+    return {"message": "Signed out"}
 
 @app.get("/me")
 def me(user: Annotated[User, Depends(get_user)], db: Annotated[Session, Depends(get_db)]):
