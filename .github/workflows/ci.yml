@@ -63,7 +63,6 @@ jobs:
               assert conn.execute(text('SELECT version_num FROM alembic_version')).scalar_one() == '0003_token_revocation'
           print('Alembic migration schema verified')
           PY
-      - run: PYTHONPATH=. pytest -q tests/test_pg_integration.py
       - name: Verify actual production-mode HTTP restrictions
         env:
           APP_ENV: production
@@ -72,6 +71,8 @@ jobs:
           JWT_SECRET: 'test-production-secret-with-more-than-48-characters-not-for-deployment'
           FRONTEND_ORIGIN: https://example.org
         run: PYTHONPATH=. pytest -q tests/test_production_runtime.py
+      - name: Run concurrency scenarios with clean isolated fixtures
+        run: PYTHONPATH=. pytest -q tests/test_pg_integration.py
   frontend:
     runs-on: ubuntu-latest
     defaults:
