@@ -15,7 +15,7 @@ jobs:
           python-version: '3.13'
       - run: pip install -r requirements.txt
       - run: python -m compileall app
-      - run: PYTHONPATH=. pytest -q tests/test_api.py tests/test_sessions.py tests/test_browser_sessions.py tests/test_audit.py tests/test_production_guardrails.py
+      - run: PYTHONPATH=. pytest -q tests/test_api.py tests/test_sessions.py tests/test_browser_sessions.py tests/test_auth_peer_limit.py tests/test_audit.py tests/test_production_guardrails.py
         env:
           DATABASE_URL: sqlite+pysqlite:///./ledgerflow_test.sqlite
           JWT_SECRET: integration-test-secret-string-32-bytes-minimum-only
@@ -58,9 +58,9 @@ jobs:
           import os
           engine = create_engine(os.environ['DATABASE_URL'])
           tables = set(inspect(engine).get_table_names())
-          assert {'users','accounts','transfers','journal_entries','login_attempts','revoked_tokens','alembic_version'} <= tables, tables
+          assert {'users','accounts','transfers','journal_entries','login_attempts','revoked_tokens','auth_peer_buckets','alembic_version'} <= tables, tables
           with engine.connect() as conn:
-              assert conn.execute(text('SELECT version_num FROM alembic_version')).scalar_one() == '0004_ledger_checks'
+              assert conn.execute(text('SELECT version_num FROM alembic_version')).scalar_one() == '0005_auth_peer_rate'
           print('Alembic migration schema verified')
           PY
       - name: Verify real PostgreSQL CHECK constraints reject invalid rows
