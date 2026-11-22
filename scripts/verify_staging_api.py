@@ -62,6 +62,7 @@ def main():
         ("GET", "/"),
         ("GET", "/docs"),
         ("GET", "/openapi.json"),
+        ("GET", "/redoc"),
         ("GET", "/me"),
         ("GET", "/transfers"),
         ("POST", "/auth/register"),
