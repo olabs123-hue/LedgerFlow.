@@ -1,0 +1,50 @@
+name: Portfolio Screenshots
+
+on:
+  push:
+    paths:
+      - frontend/src/Showcase.tsx
+      - frontend/src/style.css
+      - frontend/src/main.tsx
+      - frontend/scripts/capture-showcase.mjs
+      - .github/workflows/portfolio-screenshots.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies and Chromium
+        run: |
+          npm install --no-save @playwright/test
+          npx playwright install --with-deps chromium
+      - name: Build the genuine browser-only public showcase
+        env:
+          VITE_SHOWCASE_MODE: 'true'
+          VITE_COOKIE_AUTH_MODE: 'false'
+        run: npm run build
+      - name: Start preview and capture
+        run: |
+          npm run preview -- --host 127.0.0.1 --port 4173 > /tmp/ledgerflow-preview.log 2>&1 &
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:4173/ > /dev/null; then break; fi
+            sleep 1
+          done
+          node scripts/capture-showcase.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ledgerflow-real-desktop-mobile-screenshots
+          path: frontend/portfolio-screenshots/*.png
+          if-no-files-found: error
+          retention-days: 30
