@@ -34,5 +34,12 @@ def test_production_disables_public_registration_funding_and_docs():
         assert client.get("/transfers").status_code == 404
         assert client.post("/auth/login", json={"email": "test@example.com", "password": "bad-password-123"}).status_code == 404
         assert client.post("/auth/logout").status_code == 404
+        # The cookie session prototypes must remain inaccessible in public staging.
+        assert client.get("/browser/session").status_code == 404
+        assert client.get("/browser/me").status_code == 404
+        assert client.get("/browser/transfers").status_code == 404
+        assert client.post("/browser/session").status_code == 404
+        assert client.post("/browser/transfers").status_code == 404
+        assert client.post("/browser/logout").status_code == 404
         assert client.post("/demo/credit").status_code == 404
         # Exercise login-throttling only in a separate, nonpublic production-mode test.
