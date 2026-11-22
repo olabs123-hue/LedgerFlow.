@@ -108,6 +108,20 @@ class Entry(Base):
     account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"))
     delta_cents: Mapped[int] = mapped_column(BigInteger)
 
+class FundingGrant(Base):
+    """Fictional opening credit with an auditable idempotent source reference."""
+    __tablename__ = "funding_grants"
+    __table_args__ = (
+        CheckConstraint("amount_cents > 0", name="ck_funding_grants_positive"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"), nullable=False)
+    amount_cents: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    reference: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
 class RevokedToken(Base):
     """Server-side revocation of individual signed access tokens."""
     __tablename__ = "revoked_tokens"
@@ -432,6 +446,11 @@ def demo_credit(user: Annotated[User, Depends(get_user)], db: Annotated[Session,
     with db.begin():
         account = db.scalar(select(Account).where(Account.user_id == user_id).with_for_update())
         account.balance_cents += 100_000
+        db.add(FundingGrant(
+            account_id=account.id,
+            amount_cents=100_000,
+            reference="local-demo-" + secrets.token_urlsafe(24),
+        ))
     return {"credited_cents": 100_000, "warning": "Simulation credits have no monetary value"}
 
 
