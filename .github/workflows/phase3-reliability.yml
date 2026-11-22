@@ -6,7 +6,7 @@ on:
       - 'backend/benchmark_transfers.py'
       - 'backend/demo_operations.py'
       - '.github/workflows/phase3-reliability.yml'
-      - 'scripts/phase3_recovery.sh'
+      - 'scripts/phase3_recovery.py'
       - 'PHASE3_REPORT.md'
   pull_request:
   workflow_dispatch:
@@ -90,7 +90,7 @@ jobs:
       - name: Start disposable PostgreSQL and FastAPI
         run: docker compose up --build -d db api
       - name: Verify restart persistence and idempotency
-        run: bash scripts/phase3_recovery.sh
+        run: python3 scripts/phase3_recovery.py
       - name: Print service logs on failure
         if: failure()
         run: docker compose logs --no-color --tail=100
