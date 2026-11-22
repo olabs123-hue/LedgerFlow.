@@ -83,6 +83,7 @@ def test_https_same_origin_login_transfer_logout_and_server_rendered_ui():
         assert len(client.get("/browser/transfers").json()) == 1
         with SessionLocal() as db:
             assert db.scalar(select(func.sum(Entry.delta_cents))) == 0
+            assert reconciliation_errors(db) == []
 
         assert client.post("/browser/logout", headers={"Origin": "https://example.org"}).status_code == 403
         result = client.post("/browser/logout", headers={
