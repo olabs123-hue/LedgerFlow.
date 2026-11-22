@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import os
 import secrets
@@ -12,7 +13,7 @@ from typing import Annotated
 from app.audit import emit_request_event
 
 import jwt
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -148,7 +149,7 @@ class TransferResult(BaseModel):
     replayed: bool
 
 app = FastAPI(title="LedgerFlow API", version="0.1.0", description="Simulation only — not a payment processor", docs_url=None if APP_ENV == "production" else "/docs", redoc_url=None if APP_ENV == "production" else "/redoc", openapi_url=None if APP_ENV == "production" else "/openapi.json")
-app.add_middleware(CORSMiddleware, allow_origins=[PUBLIC_ORIGIN], allow_credentials=False, allow_methods=["GET", "POST"], allow_headers=["Authorization", "Content-Type", "Idempotency-Key"])
+app.add_middleware(CORSMiddleware, allow_origins=[PUBLIC_ORIGIN], allow_credentials=True, allow_methods=["GET", "POST"], allow_headers=["Authorization", "Content-Type", "Idempotency-Key", "X-CSRF-Token"])
 
 @app.middleware("http")
 async def security_headers(request: Request, call_next):
@@ -348,3 +349,124 @@ def demo_credit(user: Annotated[User, Depends(get_user)], db: Annotated[Session,
         account = db.scalar(select(Account).where(Account.user_id == user_id).with_for_update())
         account.balance_cents += 100_000
     return {"credited_cents": 100_000, "warning": "Simulation credits have no monetary value"}
+
+
+# Opt-in browser session endpoints for the eventual same-origin interactive demo.
+# The production public-readonly middleware still hides all these paths.
+COOKIE_NAME = "lf_session"
+SESSION_SECONDS = 3600 if APP_ENV == "production" else 8 * 3600
+
+
+def _verify_browser_origin(request: Request):
+    # Missing Origin is rejected for all browser state changes, not just mismatches.
+    if request.headers.get("origin") != PUBLIC_ORIGIN:
+        raise HTTPException(403, "Untrusted request origin")
+
+
+def _browser_claims(request: Request) -> dict:
+    raw = request.cookies.get(COOKIE_NAME)
+    if not raw:
+        raise HTTPException(401, "No browser session")
+    try:
+        return jwt.decode(raw, SECRET, algorithms=["HS256"], options={"require": ["sub", "exp", "jti"]})
+    except jwt.PyJWTError:
+        raise HTTPException(401, "Invalid or expired browser session")
+
+
+def _browser_csrf(jti: str) -> str:
+    return hmac.new(SECRET.encode(), ("ledgerflow-csrf:" + jti).encode(), hashlib.sha256).hexdigest()
+
+
+def _verify_browser_csrf(request: Request, claims: dict):
+    _verify_browser_origin(request)
+    supplied = request.headers.get("x-csrf-token", "")
+    expected = _browser_csrf(str(claims["jti"]))
+    if not hmac.compare_digest(supplied, expected):
+        raise HTTPException(403, "Invalid CSRF token")
+
+
+def get_browser_user(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+) -> User:
+    claims = _browser_claims(request)
+    if db.get(RevokedToken, str(claims["jti"])) is not None:
+        raise HTTPException(401, "Revoked browser session")
+    try:
+        user = db.get(User, int(claims["sub"]))
+    except (ValueError, TypeError):
+        user = None
+    if user is None:
+        raise HTTPException(401, "Invalid browser session")
+    return user
+
+
+@app.post("/browser/session")
+def create_browser_session(
+    body: Credentials, request: Request, response: Response,
+    db: Annotated[Session, Depends(get_db)],
+):
+    _verify_browser_origin(request)
+    # Reuse the existing credential verification and DB-backed failed-login counters.
+    token = login(body, db)["access_token"]
+    claims = jwt.decode(token, SECRET, algorithms=["HS256"])
+    response.set_cookie(
+        COOKIE_NAME, token,
+        max_age=SESSION_SECONDS, httponly=True, secure=APP_ENV == "production",
+        samesite="strict", path="/",
+    )
+    # Give JavaScript the CSRF proof only, never the bearer token.
+    return {"authenticated": True, "csrf_token": _browser_csrf(str(claims["jti"]))}
+
+
+@app.get("/browser/session")
+def read_browser_session(
+    request: Request, user: Annotated[User, Depends(get_browser_user)],
+):
+    # A CSRF proof must only be exposed to the configured frontend origin.
+    origin = request.headers.get("origin")
+    if origin is not None and origin != PUBLIC_ORIGIN:
+        raise HTTPException(403, "Untrusted request origin")
+    claims = _browser_claims(request)
+    return {"authenticated": True, "csrf_token": _browser_csrf(str(claims["jti"]))}
+
+
+@app.get("/browser/me")
+def browser_me(
+    user: Annotated[User, Depends(get_browser_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    return me(user, db)
+
+
+@app.get("/browser/transfers")
+def browser_history(
+    user: Annotated[User, Depends(get_browser_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    return history(user, db)
+
+
+@app.post("/browser/transfers", response_model=TransferResult)
+def browser_transfer(
+    body: TransferRequest, request: Request,
+    user: Annotated[User, Depends(get_browser_user)],
+    db: Annotated[Session, Depends(get_db)],
+    idempotency_key: Annotated[str, Header(min_length=8, max_length=128)],
+):
+    _verify_browser_csrf(request, _browser_claims(request))
+    return transfer(body, user, db, idempotency_key)
+
+
+@app.post("/browser/logout")
+def browser_logout(
+    request: Request, response: Response,
+    user: Annotated[User, Depends(get_browser_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    claims = _browser_claims(request)
+    _verify_browser_csrf(request, claims)
+    db.add(RevokedToken(jti=str(claims["jti"]), expires_at_epoch=int(claims["exp"])))
+    db.commit()
+    response.delete_cookie(COOKIE_NAME, path="/", samesite="strict", secure=APP_ENV == "production", httponly=True)
+    return {"message": "Signed out"}
