@@ -1,0 +1,24 @@
+# Isolated single-origin release artifact for a future invitation-only demo.
+# Do NOT deploy until the edge rate-limit and backup gates are independently verified.
+FROM node:22-alpine AS ui
+WORKDIR /ui
+COPY frontend/package*.json ./
+RUN npm install --ignore-scripts
+COPY frontend/ ./
+ENV VITE_COOKIE_AUTH_MODE=true
+ENV VITE_SHOWCASE_MODE=false
+RUN npm run build
+
+FROM python:3.13-slim AS app
+WORKDIR /code
+COPY backend/requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+COPY backend/app ./app
+COPY backend/migrations ./migrations
+COPY backend/alembic.ini ./alembic.ini
+COPY --from=ui /ui/dist ./interactive-site
+ENV INTERACTIVE_SITE_DIR=/code/interactive-site
+RUN useradd --create-home --uid 10001 ledgerflow && chown -R ledgerflow:ledgerflow /code
+USER ledgerflow
+EXPOSE 8000
+CMD ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --no-proxy-headers"]
