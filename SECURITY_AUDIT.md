@@ -53,3 +53,13 @@ Consult each latest workflow result; existence of a job does not establish a pas
 - The latest passing probe: https://github.com/olabs123-hue/LedgerFlow./actions/runs/44963630729
 - Migration `0004_ledger_checks` adds DB-enforced CHECK constraints and is validated against disposable PostgreSQL in CI. These changes must be deployed separately to Render; a GitHub commit alone does not apply migrations to staging.
 - Neither the live API probe nor automated security scanner is a complete professional penetration test or formal sign-off.
+
+
+## Phase 1 security-hardening update (22 November 2026)
+
+- Introduced `backend/app/audit.py`: allowlisted, structured JSON security events covering authentication and ledger endpoints, response status, latency, a fresh server-generated request ID and event timestamp. Sensitive input fields, passwords, access tokens, email addresses, query strings and client IPs are never intentionally included in **these audit events**.
+- Added `X-Request-ID`, API-only restrictive `Content-Security-Policy`, and `Permissions-Policy` headers.
+- Added `backend/tests/test_audit.py`, asserting correlation ID uniqueness, rejection of user-provided request identifiers, appropriate event types, and absence of secret strings and personally identifying inputs from the structured audit event output.
+- Included the audit regression suite in backend CI. Confirm latest passing run before treating the updated code as validated.
+- **Current limitations:** These are application-level structured events, not a complete audit trail with persistent, tamper-evident storage and retention. Standard server/proxy access and error logs can have separate logging rules; audit their configuration before enabling real interactive public use. IP-based rate limiting/WAF, secure same-origin browser sessions, backups, recovery drills, comprehensive threat modeling and manual penetration tests remain outstanding.
+- **Rollout control:** The Render staging API has automatic Git deployments disabled, so these source commits are **not** yet applied to the live staging service. Keep `PUBLIC_API_READONLY=true`; do not enable `ALLOW_LIVE_API`.
