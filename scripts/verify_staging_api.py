@@ -66,6 +66,12 @@ def main():
         ("POST", "/auth/logout"),
         ("POST", "/transfers"),
         ("POST", "/demo/credit"),
+        ("GET", "/browser/session"),
+        ("GET", "/browser/me"),
+        ("GET", "/browser/transfers"),
+        ("POST", "/browser/session"),
+        ("POST", "/browser/transfers"),
+        ("POST", "/browser/logout"),
     )
     for method, path in blocked:
         status, _, _ = call(method, path)
