@@ -94,6 +94,14 @@ The PostgreSQL-only, concurrency and interactive HTTPS tests are run against dis
 
 A trusted operator can provision invited demo accounts and record a simulated opening grant using the [Phase 2 runbook](PHASE2_RELEASE.md). There is **no public provisioning or funding endpoint** in the production policy. See [`provision_demo_account.py`](backend/provision_demo_account.py) and [`demo_operations.py`](backend/demo_operations.py). Do not submit real credentials or bank details.
 
+## Recruiter walkthrough and screenshots
+
+- [**CV-ready project entry and 60-second technical walkthrough**](docs/PORTFOLIO_CV.md): concise, evidence-backed bullets and interview talking points.
+- [**Desktop and mobile screenshots**](https://github.com/olabs123-hue/LedgerFlow./actions/runs/45073737115): actual Chromium captures of the browser-only public showcase. Open the Actions run's `Artifacts` section and download `ledgerflow-real-desktop-mobile-screenshots` (GitHub artifact retention: 30 days).
+- [**Architecture diagrams**](docs/ARCHITECTURE.md): deployment boundaries, transfer sequence, database relationships and cookie session flow.
+
+Screenshots come from a real built React showcase, not AI-generated mockups. The capture job also verified no requests to authentication or transfer API endpoints.
+
 ## Performance and reliability: measured, not estimated
 
 GitHub Actions measured transfers using **FastAPI in-process TestClient** with runner-local PostgreSQL. For each concurrency level there were 100 actual persisted simulated transfers, no request errors, 10 successful idempotent replays and 200 balanced journal entries.
