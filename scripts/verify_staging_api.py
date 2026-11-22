@@ -53,6 +53,9 @@ def main():
         assert headers.get("X-Frame-Options") == "DENY"
         assert "max-age=" in headers.get("Strict-Transport-Security", "")
         assert headers.get("Cache-Control") == "no-store"
+        assert headers.get("Content-Security-Policy") == "default-src 'none'; frame-ancestors 'none'"
+        assert headers.get("Permissions-Policy") == "camera=(), microphone=(), geolocation=()"
+        assert len(headers.get("X-Request-ID", "")) == 24
         print(f"PASS GET {path}: HTTP {status}, secure response headers")
 
     blocked = (
