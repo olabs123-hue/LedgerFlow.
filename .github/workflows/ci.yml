@@ -87,3 +87,7 @@ jobs:
           node-version: '22'
       - run: npm install
       - run: npm run build
+      - name: Build isolated same-origin cookie client
+        env:
+          VITE_COOKIE_AUTH_MODE: 'true'
+        run: npm run build
