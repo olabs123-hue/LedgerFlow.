@@ -46,13 +46,11 @@ jobs:
         run: |
           docker compose -f docker-compose.interactive-ci.yml exec -T api python - <<'PY'
           from app.main import SessionLocal, Account, User, password_hasher
+          from demo_operations import grant_fictional_credits, reconciliation_errors
           from sqlalchemy import select
-          accounts = [
-              ("ci-alice@example.org", 100_000),
-              ("ci-bob@example.org", 0),
-          ]
+          accounts = ("ci-alice@example.org", "ci-bob@example.org")
           with SessionLocal() as db:
-              for email, balance in accounts:
+              for email in accounts:
                   assert db.scalar(select(User).where(User.email == email)) is None
                   user = User(
                       email=email,
@@ -60,9 +58,13 @@ jobs:
                   )
                   db.add(user)
                   db.flush()
-                  db.add(Account(user_id=user.id, balance_cents=balance))
+                  db.add(Account(user_id=user.id, balance_cents=0))
               db.commit()
-          print("CI-only accounts provisioned; balances are fictional.")
+          with SessionLocal() as db:
+              grant_fictional_credits(db, accounts[0], 100_000, "ci-genesis-funding-001")
+          with SessionLocal() as db:
+              assert reconciliation_errors(db) == [], reconciliation_errors(db)
+          print("CI-only fictional accounts and auditable opening grant created.")
           PY
       - uses: actions/setup-node@v4
         with:
@@ -117,7 +119,15 @@ jobs:
           journal=$(docker compose -f docker-compose.interactive-ci.yml exec -T db \
             psql -U ledgerflow -d ledgerflow_restore_ci -Atc "SELECT COALESCE(SUM(delta_cents),0) FROM journal_entries")
           test "$journal" = "0"
-          echo "Restore verified: $restored accounts:balance checksum, journal net zero"
+          original_grants=$(docker compose -f docker-compose.interactive-ci.yml exec -T db \
+            psql -U ledgerflow -d ledgerflow -Atc "SELECT COUNT(*) || ':' || COALESCE(SUM(amount_cents),0) FROM funding_grants")
+          restored_grants=$(docker compose -f docker-compose.interactive-ci.yml exec -T db \
+            psql -U ledgerflow -d ledgerflow_restore_ci -Atc "SELECT COUNT(*) || ':' || COALESCE(SUM(amount_cents),0) FROM funding_grants")
+          test "$original_grants" = "$restored_grants"
+          docker compose -f docker-compose.interactive-ci.yml exec -T api \
+            env DATABASE_URL=postgresql+psycopg://ledgerflow:ci_only_not_a_real_secret@db:5432/ledgerflow_restore_ci \
+            python -m demo_operations reconcile
+          echo "Restore verified: $restored accounts:balance checksum, grants $restored_grants, journal net zero"
       - name: Collect diagnostics on failure
         if: failure()
         run: docker compose -f docker-compose.interactive-ci.yml logs --no-color --tail=150
