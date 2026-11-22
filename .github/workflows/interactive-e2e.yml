@@ -12,6 +12,9 @@ on:
       - '.github/workflows/interactive-e2e.yml'
       - 'backend/app/**'
       - 'backend/migrations/**'
+      - 'backend/demo_operations.py'
+      - 'backend/tests/test_production_same_origin.py'
+      - 'PHASE2_RELEASE.md'
   pull_request:
   workflow_dispatch:
 
