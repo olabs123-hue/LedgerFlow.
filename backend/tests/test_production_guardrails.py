@@ -47,3 +47,36 @@ def test_production_rejects_sqlite():
 def test_valid_production_configuration_imports():
     result = check_import({})
     assert result.returncode == 0, result.stderr
+
+
+def test_interactive_production_requires_verified_edge_and_peer_limits():
+    unsafe = check_import({"PUBLIC_API_READONLY": "false", "ALLOW_LIVE_API": "I_UNDERSTAND_THE_RISK"})
+    assert unsafe.returncode != 0
+    assert "peer throttling" in unsafe.stderr
+
+    peer_only = check_import({
+        "PUBLIC_API_READONLY": "false",
+        "ALLOW_LIVE_API": "I_UNDERSTAND_THE_RISK",
+        "AUTH_PEER_RATE_LIMIT": "true",
+    })
+    assert peer_only.returncode != 0
+    assert "edge rate limits" in peer_only.stderr
+
+
+def test_production_host_only_secure_cookie_name():
+    cmd = check_import({})
+    assert cmd.returncode == 0, cmd.stderr
+    env = os.environ.copy()
+    env.update({
+        "APP_ENV": "production",
+        "JWT_SECRET": "x" * 64,
+        "FRONTEND_ORIGIN": "https://demo.example.org",
+        "DATABASE_URL": "postgresql+psycopg://unused:unused@localhost:5432/unused",
+        "DEMO_MODE": "false",
+    })
+    result = subprocess.run(
+        [sys.executable, "-c", "from app.main import COOKIE_NAME; print(COOKIE_NAME)"],
+        capture_output=True, text=True, env=env, timeout=20
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "__Host-lf_session"
