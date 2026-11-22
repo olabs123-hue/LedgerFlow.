@@ -28,7 +28,10 @@ def test_request_audit_emits_safe_metadata_only(caplog):
         request_id = res.headers["x-request-id"]
         assert len(request_id) == 24
         assert "attacker-controlled" not in request_id
-        assert request_id != client.get("/health").headers["x-request-id"]
+        health = client.get("/health")
+        assert request_id != health.headers["x-request-id"]
+        assert health.headers["content-security-policy"] == "default-src 'none'; frame-ancestors 'none'"
+        assert health.headers["permissions-policy"] == "camera=(), microphone=(), geolocation=()"
         res = client.post("/auth/register", json={"email": email, "password": secret_password})
         assert res.status_code == 201
         assert "x-request-id" in res.headers
