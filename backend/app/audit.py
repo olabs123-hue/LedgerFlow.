@@ -7,10 +7,16 @@ from __future__ import annotations
 
 import json
 import logging
+import sys
 import time
 
 audit_logger = logging.getLogger("ledgerflow.security")
 audit_logger.setLevel(logging.INFO)
+# Dedicated stdout handler: don't depend on the ASGI server's root logger setup.
+audit_handler = logging.StreamHandler(sys.stdout)
+audit_handler.setFormatter(logging.Formatter("%(message)s"))
+audit_logger.addHandler(audit_handler)
+audit_logger.propagate = False
 
 EVENTS = {
     ("POST", "/auth/register"): "auth.registration",
