@@ -1,98 +1,146 @@
-# LedgerFlow — Full-Stack Financial Operations (Portfolio Prototype)
+# LedgerFlow
+### PostgreSQL-backed financial ledger simulation · Full-stack engineering portfolio
 
-**Simulation only.** LedgerFlow is a developer portfolio project, not a bank, payment processor, or regulated money service. All balances are fictional.
+[![CI](https://github.com/olabs123-hue/LedgerFlow./actions/workflows/ci.yml/badge.svg)](https://github.com/olabs123-hue/LedgerFlow./actions/workflows/ci.yml)
+[![Security](https://github.com/olabs123-hue/LedgerFlow./actions/workflows/security.yml/badge.svg)](https://github.com/olabs123-hue/LedgerFlow./actions/workflows/security.yml)
+[![Interactive E2E](https://github.com/olabs123-hue/LedgerFlow./actions/workflows/interactive-e2e.yml/badge.svg)](https://github.com/olabs123-hue/LedgerFlow./actions/workflows/interactive-e2e.yml)
+[![Phase 3](https://github.com/olabs123-hue/LedgerFlow./actions/workflows/phase3-reliability.yml/badge.svg)](https://github.com/olabs123-hue/LedgerFlow./actions/workflows/phase3-reliability.yml)
 
-## Stack
-React 18, TypeScript, Vite; FastAPI, SQLAlchemy, PostgreSQL; Docker Compose; JWT and Argon2.
+**[Explore the live UI showcase](https://ledgerflow-showcase-olabs123.onrender.com)** · **[Check API health](https://ledgerflow-api-staging-t1yt.onrender.com/health)** · **[Architecture](docs/ARCHITECTURE.md)** · **[Benchmark results](PHASE3_REPORT.md)**
 
-## Local setup
-1. Copy `.env.example` to `.env` and replace `JWT_SECRET` with a secure random secret of at least 32 characters.
-2. Run `docker compose up --build`.
-3. Open `http://localhost:5173` for the web interface and `http://localhost:8000/docs` for API documentation.
-4. Register two demo accounts, add simulated credit to one account, and transfer fictional funds.
+> **Fictional balances only.** LedgerFlow is a portfolio prototype, not a bank, payment processor, or regulated financial service. No real funds are moved.
+>
+> **What is live?** The public React showcase uses browser-local example data and never calls a financial API. The separate public FastAPI/PostgreSQL staging server is **read-only** and exposes only `GET /health` and `GET /ready`. The cookie-authenticated, transactional full-stack experience is **built and verified in isolated HTTPS CI**, but is **not** publicly open for registration or transfers.
 
-## Features
-- Registration and login
-- Transfer journal (debit and credit entries)
-- Integer-cent balances and simulated transfers
-- Sender locking and request idempotency
-- Transaction history and demo funding
-- Responsive React/TypeScript interface
+## Why build it?
 
-## API
-- POST /auth/register
-- POST /auth/login
-- GET /me
-- GET /transfers
-- POST /transfers (requires Idempotency-Key)
-- POST /demo/credit (DEMO_MODE only)
+LedgerFlow explores a familiar systems challenge: **how can a transfer survive concurrent requests, retries and process restarts without corrupting balances?** A transfer moves fictional integer cents between accounts using a single PostgreSQL transaction, deterministic account-row locking, one idempotency key per sender, and matched debit/credit entries.
 
-## Testing
-Run `cd backend && pip install -r requirements.txt && PYTHONPATH=. pytest -q`. Frontend build command: `cd frontend && npm install && npm run build`.
+| Engineering problem | Implemented approach | Evidence |
+| --- | --- | --- |
+| Double spends and lost updates | PostgreSQL row locks on accounts, acquired in ascending ID order | [Concurrent integration tests](backend/tests/test_pg_integration.py) |
+| Retries after uncertain outcomes | Sender-scoped idempotency keys and request-body hashes | [PostgreSQL tests](backend/tests/test_pg_integration.py) · [Crash recovery](scripts/phase3_recovery.py) |
+| Ledger correctness | Integer-cent amounts, balance constraints and two entries per transfer | [Schema migrations](backend/migrations/versions/) · [Reconciliation tool](backend/demo_operations.py) |
+| Authentication | Argon2 password hashing, short-lived JWTs, token revocation and login throttling | [Auth and cookie tests](backend/tests/test_browser_sessions.py) |
+| Safer browser session | Same-origin `__Host-` Secure/HttpOnly/SameSite cookie, server-side revocation and CSRF proof | [HTTPS Chromium E2E](frontend/interactive-tests/cookie.spec.ts) |
+| Operational recovery | Health/readiness, Docker restart test, PostgreSQL dump/restore verification | [Phase 3 report](PHASE3_REPORT.md) |
+| Controlled release | Public API read-only by default; separate CI-only interactive topology with edge limits | [Release gates](PHASE2_RELEASE.md) · [Live safety checks](scripts/verify_staging_api.py) |
 
-## Limitations and verification
-This is a learning prototype and should not be deployed publicly as-is. DEMO_MODE provides unrestricted fictional credits and must remain off in public environments. Missing production controls include email verification, rate limiting, migrations, MFA, session revocation, and audit/security hardening. Account rows are now acquired in canonical ID order to mitigate opposing-transfer deadlocks; concurrency behavior must still be validated through PostgreSQL CI.
+## Architecture
 
-On 2026-11-21 Python compilation, two SQLite API smoke tests and the frontend production build passed in GitHub Actions. A separate PostgreSQL CI job now exercises concurrent idempotent retries, opposing transfers, and error-path balance preservation. Consult the latest [CI run](../../actions) for its actual result; do not claim PostgreSQL correctness if that job is failing. No hosted public demo is deployed; no production-readiness claims are made.
+The overview below distinguishes the **currently public components** from the **interactive stack tested in CI**.
 
+```mermaid
+flowchart TB
+  Recruiter["Recruiter / visitor"] --> Showcase["Public React showcase<br/>Browser-local fictional data"]
+  Recruiter --> Probe["Public Render FastAPI staging<br/>GET /health · GET /ready only"]
+  Probe --> StagingDB[("Render PostgreSQL staging<br/>Free / temporary")]
 
-## PostgreSQL concurrency verification
-The `postgres-integration` GitHub Actions job provisions a temporary PostgreSQL 16 service and runs `backend/tests/test_pg_integration.py` in an isolated Python process. It covers:
-- 12 concurrent submissions using the **same** idempotency key (expect exactly one journaled transfer).
-- 20 simultaneous transfers in opposite directions across two accounts (expect no deadlocks).
-- Error cases that must not mutate balances or add journal entries.
+  subgraph CI["Isolated HTTPS interactive test stack — NOT publicly enabled"]
+    Browser["React SPA<br/>Cookie + CSRF client"] --> Proxy["Nginx HTTPS ingress<br/>Request limits"]
+    Proxy --> API["FastAPI<br/>Auth · transfers · journal"]
+    API --> DB[("PostgreSQL 16<br/>Transfers · entries · grants")]
+    API --> Audit["Structured audit events"]
+  end
 
-These tests are reproducible integration checks, **not** a production load test or end-to-end deployment validation.
+  style CI fill:#eff6ff,stroke:#2563eb,color:#111827
+```
 
-## Security and deployment note
-This is a local-only demonstration. Do not publish the API with `DEMO_MODE=true` or a placeholder JWT secret. A public deployment will require rate limiting, proper secrets, API migrations, operations monitoring, secure cookies/token handling, and a separate security review.
+See [architecture details, trust boundaries and transfer sequence](docs/ARCHITECTURE.md).
 
+## Technology
 
-## Public-facing portfolio showcase (frontend only)
-The repository contains a **browser-only**, static React preview in `frontend/src/Showcase.tsx`. It uses fictional sample data, has no authentication or financial backend, and does not send transfer requests to an API. Its purpose is to let recruiters explore the interface without exposing an insecure development backend.
+- **Backend:** Python 3.13, FastAPI, SQLAlchemy, Pydantic, Alembic, Argon2, PyJWT.
+- **Data:** PostgreSQL 16 (transactional row locking, uniqueness and CHECK constraints).
+- **Frontend:** React 18, TypeScript, Vite; browser-only showcase and separate opt-in cookie-based client.
+- **Operations:** Docker Compose, a multi-stage Docker build, GitHub Actions, Playwright, Render staging.
+- **Security:** Same-origin session prototype, CSRF and Origin checks, DB-backed login throttling, structured audit events, dependency/static scans.
 
-The `Public Showcase Build` workflow builds with `VITE_SHOWCASE_MODE=true` and prepares a GitHub Pages deployment. A successful workflow build does **not** necessarily mean GitHub Pages is enabled: the repository owner may need to enable **Settings → Pages → Build and deployment → GitHub Actions** and review the published URL.
+## Experience the demo
 
-## Production-mode restrictions
-Set `APP_ENV=production` for a real API deployment. The backend refuses to start if:
-- `DEMO_MODE=true`;
-- `JWT_SECRET` has fewer than 48 characters;
-- `FRONTEND_ORIGIN` does not start with `https://`;
-- a non-PostgreSQL `DATABASE_URL` is configured.
+**Public preview:** [Open the LedgerFlow showcase](https://ledgerflow-showcase-olabs123.onrender.com). Try the simulated transfer form. This deliberately updates local React state only, so refreshing resets the preview.
 
-Production disables API documentation, sets security-related response headers, issues shorter-lived JWTs, and rejects signups unless `ALLOW_REGISTRATION=true` is explicitly configured. Database auto-creation is disabled in production, so schema migrations must be built before a real API release. **These are limited guardrails, not a comprehensive security assessment.**
+**Staging API:** [Health](https://ledgerflow-api-staging-t1yt.onrender.com/health) · [PostgreSQL readiness](https://ledgerflow-api-staging-t1yt.onrender.com/ready). Authentication, registration, balance queries and transfers are **not** accessible publicly.
 
-The backend is deliberately **not** deployed with GitHub Pages. Public API deployment remains blocked pending migration tooling, login rate limiting, session security review, error logging/monitoring, and hosting credentials.
+**Full interactive demo:** The CI suite builds the React app and FastAPI into a single origin, provisions fictional invited users on disposable PostgreSQL, runs real Chromium login → transfer → logout flows, verifies ingress rate limiting, and restores a DB backup. It is a test environment, **not a public URL or a permanent hosted service**.
 
+## Run the development stack locally
 
-## Versioned database migrations
-Schema changes now live in `backend/migrations/versions/` and are managed by Alembic rather than by changing tables on application startup in production.
+Prerequisites: Docker Engine / Docker Desktop with Compose, a local checkout, and available localhost ports 5173, 8000 and 5433.
 
-**Apply migrations before starting a production backend:**
+```bash
+git clone https://github.com/olabs123-hue/LedgerFlow..git
+cd LedgerFlow.
+cp .env.example .env
+# Set JWT_SECRET in .env to a new, cryptographically random 32+ character value.
+docker compose up --build
+```
+
+Open http://localhost:5173 for the legacy development UI and http://localhost:8000/docs for the development API. In this **local-only simulation** you can create two users, sign in and transfer fictional credits; `DEMO_MODE=true` enables local demo funding. Never expose those settings on an internet-facing host.
+
+**Database migrations:** Production-style environments use `cd backend && alembic upgrade head`. Do not run migrations against an existing populated database without a verified backup and migration plan. Revision `0006_funding_grants` records auditable fictional funding grants.
+
+**Run automated tests:**
+
 ```bash
 cd backend
 python -m pip install -r requirements.txt
-alembic upgrade head
-alembic current
+PYTHONPATH=. pytest -q tests/test_api.py tests/test_sessions.py tests/test_browser_sessions.py tests/test_auth_peer_limit.py tests/test_audit.py tests/test_provisioning.py tests/test_funding_grants.py tests/test_production_guardrails.py
 ```
 
-Set `DATABASE_URL` and `JWT_SECRET` securely in the environment first. The initial revision creates the ledger tables, and the next revision adds the `login_attempts` table. The PostgreSQL CI job creates a fresh temporary database, executes all migrations, verifies the current revision, and exercises the ledger concurrency tests.
+The PostgreSQL-only, concurrency and interactive HTTPS tests are run against disposable databases by [GitHub Actions](.github/workflows/ci.yml) and [Controlled Interactive Demo E2E](.github/workflows/interactive-e2e.yml); they require specialized environments and **must not** run against the live staging database.
 
-**Existing database caution:** These initial migrations are designed for a *new* database. An existing populated database created using `Base.metadata.create_all()` requires a carefully verified baseline/stamp strategy and backup. Do not run the initial `upgrade` blindly against an existing schema.
+### Controlled demo and offline fictional credits
 
-## Authentication defenses (limited scope)
-- Failed password attempts are recorded in the database using a SHA-256 email identifier; this avoids storing email addresses in the counter table.
-- Five unsuccessful attempts within 15 minutes cause subsequent attempts targeting that identifier to return HTTP 429 with a `Retry-After` header.
-- Successful logins reset that identifier's failed-login counter.
-- Production defaults to `ALLOW_REGISTRATION=false`; demonstration funding is rejected at production startup.
-- JWTs expire after one hour in production; development tokens expire after eight hours.
+A trusted operator can provision invited demo accounts and record a simulated opening grant using the [Phase 2 runbook](PHASE2_RELEASE.md). There is **no public provisioning or funding endpoint** in the production policy. See [`provision_demo_account.py`](backend/provision_demo_account.py) and [`demo_operations.py`](backend/demo_operations.py). Do not submit real credentials or bank details.
 
-**Not yet suitable for an exposed public API.** Additional controls still needed include independent IP-based abuse protection at the reverse proxy, registration/invitation flow, session revocation and secure token transport, secure credential recovery, audit logging, dependency security checks, and staging security tests. Do not deploy the live backend publicly until those are implemented and verified. The separately hosted browser-only showcase remains the recommended recruiter-facing URL.
+## Performance and reliability: measured, not estimated
 
+GitHub Actions measured transfers using **FastAPI in-process TestClient** with runner-local PostgreSQL. For each concurrency level there were 100 actual persisted simulated transfers, no request errors, 10 successful idempotent replays and 200 balanced journal entries.
 
-## Session revocation (migration 0003)
-Each successful sign-in now receives a unique JWT `jti` identifier. `POST /auth/logout` stores its identifier in the `revoked_tokens` table until the original token expiration. Every protected endpoint rejects tokens found in that table, including replays after logout. Other independently issued session tokens remain valid. The web client invokes the logout endpoint and immediately clears its local session.
+| Workers | Transfers/s | p95 latency | p99 latency |
+| ---: | ---: | ---: | ---: |
+| 1 | 62.15 | 41.93 ms | 116.22 ms |
+| 4 | **82.29** | 68.17 ms | 83.93 ms |
+| 8 | 49.81 | 431.99 ms | 516.98 ms |
 
-Apply `alembic upgrade head` before running a production-mode API with the new schema. A housekeeping command `cd backend && python prune_revoked_tokens.py` can remove expired revocation entries from the current database; schedule this only with trusted operational credentials. Keep JWT signing secrets outside source control.
+The 4-worker configuration had the highest throughput in this **single CI comparison**. At 8 workers, contention raised latency. **These are not deployed-service throughput, internet load-test or production SLO measurements.** Method, one-run variability, raw artifact retention and recovery results: [Phase 3 report](PHASE3_REPORT.md).
 
-**Remaining limitations:** The browser client still uses JavaScript-accessible session storage for bearer tokens. For a hardened public deployment, use a security-reviewed same-origin session design, HttpOnly/Secure/SameSite cookies with CSRF defenses if appropriate, and a proper invitation/registration flow. Failed-login throttling is per email identifier, not a substitute for IP/routing abuse defenses or network access controls. The backend is intentionally not published as a public service yet.
+A separate fault-injection test kills the FastAPI process and restarts PostgreSQL. Replaying the previously committed transfer returns the original transaction without duplicating debits. See the [reliability workflow](.github/workflows/phase3-reliability.yml).
+
+## Project layout
+
+```text
+backend/
+  app/main.py                  API, transfer logic and ORM
+  app/audit.py                 Allowlisted, privacy-minimizing audit events
+  migrations/                 Alembic SQL schema history
+  tests/                      API, cookies, security, PostgreSQL integration
+  benchmark_transfers.py      Bounded reproducible local benchmark
+  provision_demo_account.py   Operator-only invited account provisioning
+  demo_operations.py          Fictional grants and reconciliation
+frontend/
+  src/Showcase.tsx             Public, browser-only portfolio showcase
+  src/CookieApp.tsx            Opt-in same-origin, cookie-based app
+  src/App.tsx                  Local development client only
+  interactive-tests/          Chromium HTTPS desktop/mobile journeys
+ci/                           Isolated HTTPS ingress test configuration
+scripts/                      Crash/restart and live-safety probes
+Dockerfile.interactive        Same-origin React/FastAPI image for CI release rehearsal
+docs/ARCHITECTURE.md          Component and transfer sequence diagrams
+PHASE2_RELEASE.md             Interactive release requirements
+PHASE3_REPORT.md              Recorded benchmarks and failure-recovery evidence
+SECURITY_AUDIT.md             Scoped audit and outstanding risks
+```
+
+## Security scope and release status
+
+Security scanners and integration tests have passed, but no professional penetration-test certification is claimed. **The public interactive service has not been launched.** Before enabling write operations, verify real hosting-edge client/IP rate controls and forwarded-header trust, durable PostgreSQL backups and recovery, invited-user provisioning, session-lifecycle checks and deployment alerts.
+
+Read [the security audit](SECURITY_AUDIT.md) and [the deployment checklist](PHASE2_RELEASE.md). The existing **free Render PostgreSQL database is scheduled to expire on 21 December 2026**; the portfolio must not depend on it for permanent customer-like data.
+
+## What this demonstrates
+
+Transactional API design · idempotency under retries · deadlock-aware row locking · double-entry journals · secure-by-design browser sessions · PostgreSQL integrity · CI/CD · browser testing · bounded performance measurement · restart/recovery engineering.
+
+**All payments, amounts and balances in this repository are fictional.**
