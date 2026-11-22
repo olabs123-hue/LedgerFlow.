@@ -103,14 +103,12 @@ def main():
         raise SystemExit("Idempotent replay failed")
 
     with SessionLocal() as db:
-        account_ids = db.scalars(select(Account.id).join(User).where(User.email.in_([
-            sender_mail,receiver_mail,
-        ]))).all()
+        sender_id = db.scalar(select(Account.id).join(User).where(User.email==sender_mail))
         count = db.scalar(select(func.count()).select_from(Transfer).where(
-            Transfer.sender_id==account_ids[0],
+            Transfer.sender_id==sender_id,
         ))
         entries = db.scalar(select(func.count()).select_from(Entry).join(Transfer).where(
-            Transfer.sender_id==account_ids[0],
+            Transfer.sender_id==sender_id,
         ))
         assert count==args.count, (count,args.count)
         assert entries==2*args.count, entries
