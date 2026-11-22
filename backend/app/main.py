@@ -45,6 +45,10 @@ if APP_ENV == "production":
         raise RuntimeError("DEMO_MODE cannot be enabled in production")
     if not PUBLIC_API_READONLY and os.getenv("ALLOW_LIVE_API") != "I_UNDERSTAND_THE_RISK":
         raise RuntimeError("Public write API requires explicit ALLOW_LIVE_API acknowledgement")
+    if not PUBLIC_API_READONLY and (
+        not AUTH_PEER_RATE_LIMIT or os.getenv("EDGE_RATE_LIMIT_VERIFIED") != "true"
+    ):
+        raise RuntimeError("Public interactive API requires peer throttling and independently verified edge rate limits")
     if len(SECRET) < 48:
         raise RuntimeError("Production JWT_SECRET must have 48+ characters")
     if not DB_URL.startswith("postgresql"):
@@ -407,7 +411,7 @@ def demo_credit(user: Annotated[User, Depends(get_user)], db: Annotated[Session,
 
 # Opt-in browser session endpoints for the eventual same-origin interactive demo.
 # The production public-readonly middleware still hides all these paths.
-COOKIE_NAME = "lf_session"
+COOKIE_NAME = "__Host-lf_session" if APP_ENV == "production" else "lf_session"
 SESSION_SECONDS = 3600 if APP_ENV == "production" else 8 * 3600
 
 
