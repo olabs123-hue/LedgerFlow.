@@ -1,0 +1,39 @@
+# TEST ONLY: ephemeral HTTPS proxy + PostgreSQL. Not deployed to Render.
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ledgerflow
+      POSTGRES_PASSWORD: ci_only_not_a_real_secret
+      POSTGRES_DB: ledgerflow
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ledgerflow -d ledgerflow"]
+      interval: 3s
+      retries: 30
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.interactive
+    environment:
+      DATABASE_URL: postgresql+psycopg://ledgerflow:ci_only_not_a_real_secret@db:5432/ledgerflow
+      JWT_SECRET: ci-only-cookie-demo-secret-abcdefghijklmnopqrstuvwxyz-0123456789
+      APP_ENV: production
+      PUBLIC_API_READONLY: "false"
+      ALLOW_REGISTRATION: "false"
+      ALLOW_LIVE_API: I_UNDERSTAND_THE_RISK
+      AUTH_PEER_RATE_LIMIT: "true"
+      EDGE_RATE_LIMIT_VERIFIED: "true"
+      DEMO_MODE: "false"
+      FRONTEND_ORIGIN: https://localhost:8443
+    depends_on:
+      db:
+        condition: service_healthy
+  edge:
+    image: nginx:stable-alpine
+    ports:
+      - "127.0.0.1:8443:443"
+    volumes:
+      - ./ci/nginx-interactive.conf:/etc/nginx/nginx.conf:ro
+      - ./ci/tls:/etc/nginx/tls:ro
+    depends_on:
+      - api
