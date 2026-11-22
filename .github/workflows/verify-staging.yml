@@ -6,6 +6,9 @@ on:
       - scripts/verify_staging_api.py
       - .github/workflows/verify-staging.yml
   workflow_dispatch:
+  schedule:
+    # Every six hours (UTC): GitHub Actions reports failures in the Actions tab.
+    - cron: '17 */6 * * *'
 
 permissions:
   contents: read
