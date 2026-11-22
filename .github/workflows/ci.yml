@@ -85,6 +85,24 @@ jobs:
           JWT_SECRET: 'test-production-secret-with-more-than-48-characters-not-for-deployment'
           FRONTEND_ORIGIN: https://example.org
         run: PYTHONPATH=. pytest -q tests/test_production_interactive_policy.py
+      - name: Build same-origin React bundle for real HTTPS semantics
+        run: |
+          cd ../frontend
+          npm install --ignore-scripts
+          VITE_COOKIE_AUTH_MODE=true VITE_SHOWCASE_MODE=false npm run build
+      - name: Verify production-style same-origin browser API journey on PostgreSQL
+        env:
+          APP_ENV: production
+          PUBLIC_API_READONLY: 'false'
+          ALLOW_REGISTRATION: 'false'
+          DEMO_MODE: 'false'
+          ALLOW_LIVE_API: I_UNDERSTAND_THE_RISK
+          AUTH_PEER_RATE_LIMIT: 'true'
+          EDGE_RATE_LIMIT_VERIFIED: 'true'
+          JWT_SECRET: 'test-production-secret-with-more-than-48-characters-not-for-deployment'
+          FRONTEND_ORIGIN: https://example.org
+          INTERACTIVE_SITE_DIR: ../frontend/dist
+        run: PYTHONPATH=. pytest -q tests/test_production_same_origin.py
       - name: Run concurrency scenarios with clean isolated fixtures
         run: PYTHONPATH=. pytest -q tests/test_pg_integration.py
   frontend:
