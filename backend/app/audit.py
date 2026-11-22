@@ -26,6 +26,12 @@ EVENTS = {
     ("GET", "/transfers"): "ledger.history",
     ("GET", "/me"): "account.read",
     ("POST", "/demo/credit"): "demo.credit",
+    ("POST", "/browser/session"): "browser.login",
+    ("POST", "/browser/logout"): "browser.logout",
+    ("POST", "/browser/transfers"): "browser.transfer",
+    ("GET", "/browser/session"): "browser.session",
+    ("GET", "/browser/me"): "browser.account",
+    ("GET", "/browser/transfers"): "browser.history",
 }
 
 
