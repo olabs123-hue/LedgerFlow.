@@ -11,6 +11,7 @@ export default defineConfig({
     trace: 'retain-on-failure',
   },
   projects: [
-    {name:'desktop-cookie-demo', use:{...devices['Desktop Chrome']}},
+    {name:'desktop-cookie-demo', testMatch:'**/cookie.spec.ts', use:{...devices['Desktop Chrome']}},
+    {name:'mobile-cookie-demo', testMatch:'**/mobile.spec.ts', use:{...devices['Pixel 7']}},
   ],
 });
