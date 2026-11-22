@@ -10,6 +10,7 @@ import logging
 import time
 
 audit_logger = logging.getLogger("ledgerflow.security")
+audit_logger.setLevel(logging.INFO)
 
 EVENTS = {
     ("POST", "/auth/register"): "auth.registration",
