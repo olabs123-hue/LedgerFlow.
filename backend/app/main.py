@@ -35,6 +35,7 @@ APP_ENV = os.getenv("APP_ENV", "development").lower()
 PUBLIC_ORIGIN = os.getenv("FRONTEND_ORIGIN", "http://localhost:5173")
 ALLOW_REGISTRATION = os.getenv("ALLOW_REGISTRATION", "false").lower() == "true"
 PUBLIC_API_READONLY = os.getenv("PUBLIC_API_READONLY", "true" if APP_ENV == "production" else "false").lower() == "true"
+AUTH_PEER_RATE_LIMIT = os.getenv("AUTH_PEER_RATE_LIMIT", "false").lower() == "true"
 if not SECRET or SECRET == "REPLACE_WITH_A_LONG_RANDOM_SECRET_BEFORE_DEPLOYING" or len(SECRET) < 32:
     raise RuntimeError("Set JWT_SECRET to a secure random string (32+ characters)")
 if APP_ENV not in {"development", "test", "production"}:
@@ -102,6 +103,17 @@ class RevokedToken(Base):
     jti: Mapped[str] = mapped_column(String(64), primary_key=True)
     expires_at_epoch: Mapped[int] = mapped_column(BigInteger, nullable=False)
 
+class AuthPeerBucket(Base):
+    """Shared coarse-grained auth request limiter by verified socket peer.
+
+    Does not use untrusted Forwarded/X-Forwarded-For request headers. Behind a
+    reverse proxy the socket peer may be shared; confirm proxy topology first.
+    """
+    __tablename__ = "auth_peer_buckets"
+    bucket_key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    count: Mapped[int] = mapped_column(default=0)
+    window_epoch: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
 class LoginAttempt(Base):
     """Database-backed failed-password counter, keyed by email digest."""
     __tablename__ = "login_attempts"
@@ -134,6 +146,38 @@ def _record_failed_login(db: Session, email_hash: str, now: int):
     db.execute(statement)
     db.commit()
 
+AUTH_PEER_LIMIT = 60
+AUTH_PEER_WINDOW = 60
+AUTH_PEER_PATHS = {
+    "/auth/login", "/browser/session", "/auth/register",
+}
+
+def _limit_auth_peer(db: Session, peer: str, now: int):
+    # Never trust client-supplied forwarding headers for a rate limit.
+    key = hashlib.sha256(peer.encode("utf-8")).hexdigest()
+    statement = (pg_insert if db.bind.dialect.name == "postgresql" else sqlite_insert)(
+        AuthPeerBucket
+    ).values(bucket_key=key, count=1, window_epoch=now)
+    statement = statement.on_conflict_do_update(
+        index_elements=["bucket_key"],
+        set_={
+            "count": case(
+                (AuthPeerBucket.window_epoch <= now - AUTH_PEER_WINDOW, 1),
+                else_=AuthPeerBucket.count + 1,
+            ),
+            "window_epoch": case(
+                (AuthPeerBucket.window_epoch <= now - AUTH_PEER_WINDOW, now),
+                else_=AuthPeerBucket.window_epoch,
+            ),
+        },
+    )
+    db.execute(statement)
+    db.commit()
+    bucket = db.get(AuthPeerBucket, key)
+    if bucket.count > AUTH_PEER_LIMIT:
+        seconds = max(1, AUTH_PEER_WINDOW - (now - bucket.window_epoch))
+        raise HTTPException(429, "Too many authentication requests", headers={"Retry-After": str(seconds)})
+
 class Credentials(BaseModel):
     email: EmailStr
     password: str = Field(min_length=10, max_length=256)
@@ -163,6 +207,16 @@ async def security_headers(request: Request, call_next):
             request.method != "GET" or request.url.path not in ("/health", "/ready")
         ):
             response = JSONResponse({"detail": "Not found"}, status_code=404)
+        elif AUTH_PEER_RATE_LIMIT and request.method == "POST" and request.url.path in AUTH_PEER_PATHS:
+            # Always use ASGI socket peer, never spoofable X-Forwarded-For.
+            # Render's proxy may present a shared address: deliberately opt-in.
+            try:
+                with SessionLocal() as db:
+                    _limit_auth_peer(db, request.client.host if request.client else "unknown", int(time.time()))
+            except HTTPException as exc:
+                response = JSONResponse({"detail": exc.detail}, status_code=exc.status_code, headers=exc.headers)
+            else:
+                response = await call_next(request)
         else:
             response = await call_next(request)
         status = response.status_code
