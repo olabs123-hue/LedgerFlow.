@@ -43,6 +43,8 @@ if APP_ENV not in {"development", "test", "production"}:
 if APP_ENV == "production":
     if DEMO_MODE:
         raise RuntimeError("DEMO_MODE cannot be enabled in production")
+    if ALLOW_REGISTRATION:
+        raise RuntimeError("Public registration is not supported in production: use offline account provisioning")
     if not PUBLIC_API_READONLY and os.getenv("ALLOW_LIVE_API") != "I_UNDERSTAND_THE_RISK":
         raise RuntimeError("Public write API requires explicit ALLOW_LIVE_API acknowledgement")
     if not PUBLIC_API_READONLY and (
@@ -210,6 +212,13 @@ async def security_headers(request: Request, call_next):
         if APP_ENV == "production" and PUBLIC_API_READONLY and (
             request.method != "GET" or request.url.path not in ("/health", "/ready")
         ):
+            response = JSONResponse({"detail": "Not found"}, status_code=404)
+        elif APP_ENV == "production" and not PUBLIC_API_READONLY and not (
+            request.url.path in ("/health", "/ready") or
+            request.url.path.startswith("/browser/")
+        ):
+            # Public interactive demo must use HttpOnly browser sessions only:
+            # legacy bearer-token routes and demo funding remain inaccessible.
             response = JSONResponse({"detail": "Not found"}, status_code=404)
         elif AUTH_PEER_RATE_LIMIT and request.method == "POST" and request.url.path in AUTH_PEER_PATHS:
             # Always use ASGI socket peer, never spoofable X-Forwarded-For.
