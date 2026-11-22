@@ -76,10 +76,16 @@ def main():
         ("POST", "/browser/transfers"),
         ("POST", "/browser/logout"),
     )
+    request_ids = set()
     for method, path in blocked:
-        status, _, _ = call(method, path)
+        status, headers, _ = call(method, path)
         assert status == 404, f"SECURITY FAILURE: {method} {path} returned {status}, expected 404"
-        print(f"PASS {method} {path}: HTTP 404")
+        request_id = headers.get("X-Request-ID", "")
+        assert len(request_id) == 24, (method, path, "missing request correlation ID")
+        assert request_id not in request_ids, (method, path, "duplicate request correlation ID")
+        assert headers.get("Cache-Control") == "no-store"
+        request_ids.add(request_id)
+        print(f"PASS {method} {path}: HTTP 404 with secure headers")
 
 if __name__ == "__main__":
     main()
