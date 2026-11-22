@@ -50,27 +50,33 @@ jobs:
         run: pip install -r requirements.txt
       - name: Migrate disposable PostgreSQL
         run: alembic upgrade head
-      - name: Benchmark 100 transfers with 4 workers
-        run: python benchmark_transfers.py --count 100 --workers 4 --output phase3-benchmark.json
-      - name: Validate machine-readable measured results
+      - name: Benchmark 100 transfers with one worker
+        run: python benchmark_transfers.py --count 100 --workers 1 --output phase3-benchmark-1.json
+      - name: Benchmark 100 transfers with four workers
+        run: python benchmark_transfers.py --count 100 --workers 4 --output phase3-benchmark-4.json
+      - name: Benchmark 100 transfers with eight workers
+        run: python benchmark_transfers.py --count 100 --workers 8 --output phase3-benchmark-8.json
+      - name: Validate measured results and preserve comparisons
         run: |
           python - <<'PY'
           import json
-          data=json.load(open("phase3-benchmark.json", encoding="utf-8"))
-          assert data["requests"]==100
-          assert data["workers"]==4
-          assert data["errors"]==0
-          assert data["successful_replays"]==10
-          assert data["journal_rows"]==200
-          assert data["balanced_reconciliation"] is True
-          assert data["throughput_requests_per_second"]>0
-          assert data["latency_ms"]["p99"]>=data["latency_ms"]["p50"]>0
-          print("Measured results and integrity checks verified")
+          for workers in (1,4,8):
+              data=json.load(open(f"phase3-benchmark-{workers}.json", encoding="utf-8"))
+              assert data["requests"]==100
+              assert data["workers"]==workers
+              assert data["errors"]==0
+              assert data["successful_replays"]==10
+              assert data["journal_rows"]==200
+              assert data["balanced_reconciliation"] is True
+              assert data["throughput_requests_per_second"]>0
+              assert data["latency_ms"]["p99"]>=data["latency_ms"]["p50"]>0
+              print("Workers",workers,":",data["throughput_requests_per_second"],
+                    "req/s; p95",data["latency_ms"]["p95"],"ms")
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: ledgerflow-phase3-measured-transfer-benchmark
-          path: backend/phase3-benchmark.json
+          name: ledgerflow-phase3-measured-transfer-benchmarks
+          path: backend/phase3-benchmark-*.json
           if-no-files-found: error
           retention-days: 30
 
