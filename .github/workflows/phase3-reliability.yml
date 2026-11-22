@@ -1,0 +1,101 @@
+name: Phase 3 Performance and Reliability
+
+on:
+  push:
+    paths:
+      - 'backend/benchmark_transfers.py'
+      - 'backend/demo_operations.py'
+      - '.github/workflows/phase3-reliability.yml'
+      - 'scripts/phase3_recovery.sh'
+      - 'PHASE3_REPORT.md'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  measured-transfers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: ledgerflow_benchmark
+          POSTGRES_USER: ledgerflow
+          POSTGRES_PASSWORD: disposable_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ledgerflow -d ledgerflow_benchmark"
+          --health-interval 3s
+          --health-timeout 3s
+          --health-retries 15
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DATABASE_URL: postgresql+psycopg://ledgerflow:disposable_ci@127.0.0.1:5432/ledgerflow_benchmark
+      JWT_SECRET: phase-three-ci-only-key-for-benchmarks-and-test-sessions
+      DEMO_MODE: 'false'
+      APP_ENV: test
+      BENCHMARK_DISPOSABLE_DB: I_ACKNOWLEDGE
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install locked-in-range test dependencies
+        run: pip install -r requirements.txt
+      - name: Migrate disposable PostgreSQL
+        run: alembic upgrade head
+      - name: Benchmark 100 transfers with 4 workers
+        run: python benchmark_transfers.py --count 100 --workers 4 --output phase3-benchmark.json
+      - name: Validate machine-readable measured results
+        run: |
+          python - <<'PY'
+          import json
+          data=json.load(open("phase3-benchmark.json", encoding="utf-8"))
+          assert data["requests"]==100
+          assert data["workers"]==4
+          assert data["errors"]==0
+          assert data["successful_replays"]==10
+          assert data["journal_rows"]==200
+          assert data["balanced_reconciliation"] is True
+          assert data["throughput_requests_per_second"]>0
+          assert data["latency_ms"]["p99"]>=data["latency_ms"]["p50"]>0
+          print("Measured results and integrity checks verified")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ledgerflow-phase3-measured-transfer-benchmark
+          path: backend/phase3-benchmark.json
+          if-no-files-found: error
+          retention-days: 30
+
+  restart-and-recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure isolated local environment
+        run: |
+          {
+            echo "JWT_SECRET=$(openssl rand -hex 32)"
+            echo "DEMO_MODE=true"
+            echo "FRONTEND_ORIGIN=http://localhost:5173"
+          } > .env
+          chmod 600 .env
+      - name: Start disposable PostgreSQL and FastAPI
+        run: docker compose up --build -d db api
+      - name: Verify restart persistence and idempotency
+        run: bash scripts/phase3_recovery.sh
+      - name: Print service logs on failure
+        if: failure()
+        run: docker compose logs --no-color --tail=100
+      - name: Erase disposable test database and credentials
+        if: always()
+        run: |
+          docker compose down -v --remove-orphans
+          rm -f .env
