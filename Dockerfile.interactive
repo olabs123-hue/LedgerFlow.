@@ -16,6 +16,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY backend/app ./app
 COPY backend/migrations ./migrations
 COPY backend/alembic.ini ./alembic.ini
+COPY backend/demo_operations.py ./demo_operations.py
 COPY --from=ui /ui/dist ./interactive-site
 ENV INTERACTIVE_SITE_DIR=/code/interactive-site
 RUN useradd --create-home --uid 10001 ledgerflow && chown -R ledgerflow:ledgerflow /code
