@@ -87,3 +87,19 @@ Cookie authentication is an engineering prototype, **not a certification of comp
 - `frontend/src/CookieApp.tsx` is an **opt-in** browser client enabled with `VITE_COOKIE_AUTH_MODE=true` (only when `VITE_SHOWCASE_MODE` is not enabled). It calls relative `/browser` endpoints with `credentials: same-origin`, holds the CSRF proof only in memory and does not store the JWT in JavaScript-accessible storage. Vite proxies `/browser` to the local FastAPI development server.
 - The current public Render showcase remains browser-only and the public API remains read-only. Do not deploy the cookie client on a different origin from the API and assume `SameSite=Strict` works for cross-site authentication. A future interactive deployment requires a same-origin reverse proxy and independently tested network policy.
 - The same-origin client currently does **not** support invitation provisioning, funded fixture setup, all-session revocation, tested token refresh or comprehensive user-management lifecycle. These remain unresolved, as do external WAF/rate-limit setup and durable database recovery.
+
+
+## Operator-only account provisioning (Phase 1 continuation)
+
+The project now has `backend/provision_demo_account.py` for **offline, operator-controlled** fictional account creation using an interactively entered, strong demo-only password. It does not accept passwords as command-line arguments, stores Argon2 password hashes, refuses duplicate accounts, creates an account with **zero starting balance**, and does not create real value or ledger transfers. Run only from a trusted shell with intended `DATABASE_URL` and `JWT_SECRET` values and database write permissions:
+
+```bash
+cd backend
+python provision_demo_account.py --email invited-tester@example.org
+```
+
+No invitation emails or credentials are sent automatically. Any operator must transmit demo-only credentials through a secure, separately managed channel. **The hosted read-only staging service does not expose this command**, and provisioning has not been performed against the live staging database.
+
+For the future **interactive production** mode (still not enabled), the middleware now hides all non-`/browser/` application routes except `/health` and `/ready`, including the old bearer-token login, public registration, funding and transfer endpoints. Production refuses to start with `ALLOW_REGISTRATION=true`. This ensures future public users are not encouraged to use browser-accessible JWTs as an alternative to the HttpOnly cookie design.
+
+This is preparation, **not the end of Phase 1**: verified edge-based client-IP abuse limits, invitation provisioning operational procedures, validated same-origin deployment, real backups/restoration and session-lifecycle hardening are outstanding.
