@@ -9,11 +9,12 @@ os.environ["DEMO_MODE"] = "true"
 
 from fastapi.testclient import TestClient
 from app.main import app, Base, engine
-from app.audit import emit_request_event
+from app.audit import emit_request_event, audit_logger
 
 
-def test_request_audit_emits_safe_metadata_only(caplog):
+def test_request_audit_emits_safe_metadata_only(caplog, monkeypatch):
     Base.metadata.drop_all(engine)
+    monkeypatch.setattr(audit_logger, "propagate", True)
     caplog.set_level(logging.INFO, logger="ledgerflow.security")
     secret_password = "redact-me-supersecret-123"
     email = "private-person@example.com"
