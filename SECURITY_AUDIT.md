@@ -4,7 +4,7 @@
 
 ## Deployment decision
 
-The public portfolio frontend is browser-only. The real API remains undeployed. The proposed Render staging API is explicitly **read-only**: `APP_ENV=production`, `PUBLIC_API_READONLY=true`, `DEMO_MODE=false`, `ALLOW_REGISTRATION=false`. Only `GET /health` and `GET /ready` are reachable. Other operations return 404. All balances are fictional.
+The public portfolio frontend is browser-only. The actual Render-hosted FastAPI staging service is deployed and explicitly **read-only**: `APP_ENV=production`, `PUBLIC_API_READONLY=true`, `DEMO_MODE=false`, `ALLOW_REGISTRATION=false`. Only `GET /health` and `GET /ready` are reachable. Other operations return 404. All balances are fictional.
 
 The staging Render PostgreSQL database `ledgerflow-api-staging-db` is on a free plan, provisioned in Oregon, with an expiry of **21 December 2026**. Treat all its data as disposable and do not use it for actual financial transactions.
 
@@ -24,16 +24,16 @@ Consult each latest workflow result; existence of a job does not establish a pas
 
 | Priority | Finding | Required remediation |
 |---|---|---|
-| High | A fully interactive public API would use JavaScript-accessible bearer tokens in sessionStorage, exposing tokens to XSS and browser extensions. | Design same-origin session handling with HttpOnly, Secure, SameSite cookies and CSRF prevention; test lifecycle and refresh/revocation. |
-| High | Public login and account creation lack per-IP/network-level abuse controls. Per-email lockouts could be abused to deny users access. | Use a trusted reverse proxy or WAF for per-IP and per-route rate limits, plus detection and monitoring. |
+| High | The legacy local-development UI stores a bearer token in JavaScript-accessible sessionStorage; it must not be deployed publicly. The separate same-origin HttpOnly cookie client is built and tested in isolated CI, but production session renewal, all-session revocation and provider deployment checks remain unfinished. | Keep the legacy client local-only; verify production cookie policy, CSRF, session lifecycle and operational revocation before public interactive release. |
+| High | A bounded Nginx edge-rate-limit test passed in isolated HTTPS CI, but real hosting provider client-IP attribution and edge controls have not been independently verified. Per-email lockouts could still be abused to deny users access. | Verify real ingress client identity, per-IP/per-route policies and monitoring before enabling any public auth/write endpoints. |
 | High | Free Render database expires on 21 December 2026. No durable backup/restore/retention plan is in place. | Choose persistent funded DB for any durable use, configure backups and test restoration. Never store actual funds or sensitive customer information. |
-| Medium | No invitation, email verification, password recovery, MFA or user lifecycle policy. | Implement and test before enabling public registration. |
-| Medium | No structured security audit trail and alerting for auth, transfers, privilege changes or anomalous traffic. | Add redacted logs, metrics, alerts and retention policy. |
+| Medium | Offline, operator-only invitation provisioning is implemented and tested. Email verification, password recovery, MFA, and wider session/account lifecycle policy are not completed. Public registration is intentionally disabled. | Finalize secure invitation distribution and lifecycle policies before broader deployment; do not open unrestricted registration. |
+| Medium | Structured allowlisted and redacted audit events exist, but there is no demonstrated tamper-evident retained audit store, comprehensive anomaly monitoring, paging/alerting, or retention policy. | Establish secure log retention, transfer/auth alerts and incident response ownership before public interactive release. |
 | Medium | Nonnegative balances, positive transfer amounts, distinct sender/recipient accounts, and nonzero journal entries now have database-level CHECK constraints (revision 0004). However, immutability and aggregate double-entry balancing are still only enforced through application logic and tests. | Add controlled append-only journals, restricted database roles and automated reconciliation checks. |
 | Medium | Input-size limits, request timeouts and protection from resource exhaustion rely on infrastructure defaults. | Configure explicit body limits, worker concurrency limits and trusted proxy timeouts. |
 | Medium | Dependencies use version ranges rather than deterministic locked releases; audits may change when resolver selects new versions. | Generate reviewable Python and npm lock files and run update automation. |
 | Low | Backend uses deprecated FastAPI startup event. | Migrate to lifespan management. |
-| Low | No evidence of production recovery drills, load tests, third-party penetration tests or regulatory compliance review. | Add separate plans and external review if scope grows beyond a portfolio prototype. |
+| Low | Isolated CI benchmarks, forced API restart, PostgreSQL restart and database restore drills have passed. No comparable live-provider disaster recovery, sustained external load testing, third-party penetration test or compliance review exists. | Verify the actual deployment recovery posture; arrange independent review if expanding beyond a portfolio prototype. |
 
 ## Release gates
 
@@ -44,7 +44,7 @@ Consult each latest workflow result; existence of a job does not establish a pas
 5. Verify public endpoints return 404 for registration, login, transfers and funding, and verify health/readiness independently.
 6. A complete production security audit requires scoped threat modeling, manual code review, dependency and infrastructure inspection, penetration testing, monitoring/recovery validation and documented sign-off.
 
-**Verdict:** The locked read-only staging API can be a safe first deployment milestone after validation. The interactive backend **is not approved for unrestricted public production use**.
+**Verdict:** The public read-only Render staging API is deployed and has passed external restricted-route checks. The interactive backend **is not approved for unrestricted public production use**.
 
 
 ## Deployment verification (22 November 2026)
@@ -103,3 +103,11 @@ No invitation emails or credentials are sent automatically. Any operator must tr
 For the future **interactive production** mode (still not enabled), the middleware now hides all non-`/browser/` application routes except `/health` and `/ready`, including the old bearer-token login, public registration, funding and transfer endpoints. Production refuses to start with `ALLOW_REGISTRATION=true`. This ensures future public users are not encouraged to use browser-accessible JWTs as an alternative to the HttpOnly cookie design.
 
 This is preparation, **not the end of Phase 1**: verified edge-based client-IP abuse limits, invitation provisioning operational procedures, validated same-origin deployment, real backups/restoration and session-lifecycle hardening are outstanding.
+
+
+## Phase 3 and Phase 4 evidence update (22 November 2026)
+
+- An isolated GitHub-hosted PostgreSQL benchmark compared 100 simulated transfers at 1/4/8 workers and validated balanced entries and idempotent retry. See [Phase 3 report](PHASE3_REPORT.md). These are **in-process CI results**, not production throughput.
+- CI verified a forced FastAPI crash and PostgreSQL restart, and a separate dump/restore test with reconciliation. These do **not** establish actual Render backup durability or production RTO/RPO.
+- Portfolio architecture and user-facing release boundaries are described in [Architecture](docs/ARCHITECTURE.md) and [README](README.md). The full interactive stack remains tested in isolated HTTPS CI only.
+- The latest independently verified read-only service routes passed [GitHub Actions live safety verification](https://github.com/olabs123-hue/LedgerFlow./actions/runs/45072706590).
