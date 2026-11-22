@@ -9,6 +9,8 @@ import time
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
+from app.audit import emit_request_event
+
 import jwt
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -150,20 +152,32 @@ app.add_middleware(CORSMiddleware, allow_origins=[PUBLIC_ORIGIN], allow_credenti
 
 @app.middleware("http")
 async def security_headers(request: Request, call_next):
-    # Public release first exposes ONLY liveness/readiness, not user or money-like APIs.
-    if APP_ENV == "production" and PUBLIC_API_READONLY and (
-        request.method != "GET" or request.url.path not in ("/health", "/ready")
-    ):
-        response = JSONResponse({"detail": "Not found"}, status_code=404)
-    else:
-        response = await call_next(request)
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
-    response.headers["Referrer-Policy"] = "no-referrer"
-    response.headers["Cache-Control"] = "no-store"
-    if APP_ENV == "production":
-        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-    return response
+    # Always generate the correlation ID ourselves; ignore untrusted input headers.
+    request_id = secrets.token_hex(12)
+    started = time.monotonic()
+    status = 500
+    try:
+        # Public release first exposes ONLY liveness/readiness, not user or ledger APIs.
+        if APP_ENV == "production" and PUBLIC_API_READONLY and (
+            request.method != "GET" or request.url.path not in ("/health", "/ready")
+        ):
+            response = JSONResponse({"detail": "Not found"}, status_code=404)
+        else:
+            response = await call_next(request)
+        status = response.status_code
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["X-Request-ID"] = request_id
+        if APP_ENV == "production":
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        return response
+    finally:
+        emit_request_event(
+            request_id=request_id, method=request.method, path=request.url.path,
+            status=status, elapsed_ms=round((time.monotonic() - started) * 1000),
+        )
 
 @app.on_event("startup")
 def startup():
