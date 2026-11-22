@@ -18,6 +18,7 @@ from sqlalchemy import func, select
 
 from app.main import Account, Entry, SessionLocal, User, app
 from provision_demo_account import provision_demo_user
+from demo_operations import grant_fictional_credits, reconciliation_errors
 
 
 def test_https_same_origin_login_transfer_logout_and_server_rendered_ui():
