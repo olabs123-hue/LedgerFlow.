@@ -15,7 +15,7 @@ jobs:
           python-version: '3.13'
       - run: pip install -r requirements.txt
       - run: python -m compileall app
-      - run: PYTHONPATH=. pytest -q tests/test_api.py tests/test_sessions.py tests/test_browser_sessions.py tests/test_auth_peer_limit.py tests/test_audit.py tests/test_production_guardrails.py
+      - run: PYTHONPATH=. pytest -q tests/test_api.py tests/test_sessions.py tests/test_browser_sessions.py tests/test_auth_peer_limit.py tests/test_audit.py tests/test_provisioning.py tests/test_production_guardrails.py
         env:
           DATABASE_URL: sqlite+pysqlite:///./ledgerflow_test.sqlite
           JWT_SECRET: integration-test-secret-string-32-bytes-minimum-only
@@ -73,6 +73,18 @@ jobs:
           JWT_SECRET: 'test-production-secret-with-more-than-48-characters-not-for-deployment'
           FRONTEND_ORIGIN: https://example.org
         run: PYTHONPATH=. pytest -q tests/test_production_runtime.py
+      - name: Verify interactive production policy on disposable PostgreSQL
+        env:
+          APP_ENV: production
+          PUBLIC_API_READONLY: 'false'
+          ALLOW_REGISTRATION: 'false'
+          DEMO_MODE: 'false'
+          ALLOW_LIVE_API: I_UNDERSTAND_THE_RISK
+          AUTH_PEER_RATE_LIMIT: 'true'
+          EDGE_RATE_LIMIT_VERIFIED: 'true'
+          JWT_SECRET: 'test-production-secret-with-more-than-48-characters-not-for-deployment'
+          FRONTEND_ORIGIN: https://example.org
+        run: PYTHONPATH=. pytest -q tests/test_production_interactive_policy.py
       - name: Run concurrency scenarios with clean isolated fixtures
         run: PYTHONPATH=. pytest -q tests/test_pg_integration.py
   frontend:
