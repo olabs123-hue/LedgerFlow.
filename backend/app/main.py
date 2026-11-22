@@ -14,7 +14,9 @@ from app.audit import emit_request_event
 
 import jwt
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from pathlib import Path
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, EmailStr, Field
@@ -36,6 +38,7 @@ PUBLIC_ORIGIN = os.getenv("FRONTEND_ORIGIN", "http://localhost:5173")
 ALLOW_REGISTRATION = os.getenv("ALLOW_REGISTRATION", "false").lower() == "true"
 PUBLIC_API_READONLY = os.getenv("PUBLIC_API_READONLY", "true" if APP_ENV == "production" else "false").lower() == "true"
 AUTH_PEER_RATE_LIMIT = os.getenv("AUTH_PEER_RATE_LIMIT", "false").lower() == "true"
+INTERACTIVE_SITE_DIR = os.getenv("INTERACTIVE_SITE_DIR", "").strip()
 if not SECRET or SECRET == "REPLACE_WITH_A_LONG_RANDOM_SECRET_BEFORE_DEPLOYING" or len(SECRET) < 32:
     raise RuntimeError("Set JWT_SECRET to a secure random string (32+ characters)")
 if APP_ENV not in {"development", "test", "production"}:
@@ -55,6 +58,8 @@ if APP_ENV == "production":
         raise RuntimeError("Production JWT_SECRET must have 48+ characters")
     if not DB_URL.startswith("postgresql"):
         raise RuntimeError("Production requires PostgreSQL")
+    if not PUBLIC_API_READONLY and INTERACTIVE_SITE_DIR and not Path(INTERACTIVE_SITE_DIR, "index.html").is_file():
+        raise RuntimeError("Interactive frontend bundle is missing its index.html")
     if not PUBLIC_ORIGIN.startswith("https://"):
         raise RuntimeError("Production FRONTEND_ORIGIN must use HTTPS")
 engine = create_engine(DB_URL, pool_pre_ping=True)
@@ -215,7 +220,10 @@ async def security_headers(request: Request, call_next):
             response = JSONResponse({"detail": "Not found"}, status_code=404)
         elif APP_ENV == "production" and not PUBLIC_API_READONLY and not (
             request.url.path in ("/health", "/ready") or
-            request.url.path.startswith("/browser/")
+            request.url.path.startswith("/browser/") or
+            (INTERACTIVE_SITE_DIR and request.method == "GET" and (
+                request.url.path == "/" or request.url.path.startswith("/assets/")
+            ))
         ):
             # Public interactive demo must use HttpOnly browser sessions only:
             # legacy bearer-token routes and demo funding remain inaccessible.
@@ -237,7 +245,16 @@ async def security_headers(request: Request, call_next):
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["Cache-Control"] = "no-store"
-        response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
+        if APP_ENV == "production" and INTERACTIVE_SITE_DIR and request.method == "GET" and (
+            request.url.path == "/" or request.url.path.startswith("/assets/")
+        ):
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'none'; script-src 'self'; style-src 'self'; "
+                "img-src 'self' data:; connect-src 'self'; font-src 'self'; "
+                "base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'"
+            )
+        else:
+            response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
         response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
         response.headers["X-Request-ID"] = request_id
         if APP_ENV == "production":
@@ -537,3 +554,17 @@ def browser_logout(
     db.commit()
     response.delete_cookie(COOKIE_NAME, path="/", samesite="strict", secure=APP_ENV == "production", httponly=True)
     return {"message": "Signed out"}
+
+
+# Optional same-origin SPA. Only a production interactive build may reach these
+# paths; PUBLIC_API_READONLY middleware rejects them in public staging.
+if INTERACTIVE_SITE_DIR:
+    static_root = Path(INTERACTIVE_SITE_DIR).resolve()
+    if not (static_root / "index.html").is_file() or not (static_root / "assets").is_dir():
+        raise RuntimeError("Interactive site requires an index.html and assets directory")
+
+    @app.get("/", include_in_schema=False)
+    def interactive_index():
+        return FileResponse(static_root / "index.html", media_type="text/html")
+
+    app.mount("/assets", StaticFiles(directory=str(static_root / "assets")), name="interactive-assets")
