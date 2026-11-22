@@ -1,0 +1,128 @@
+name: Controlled Interactive Demo E2E
+
+on:
+  push:
+    paths:
+      - 'Dockerfile.interactive'
+      - 'docker-compose.interactive-ci.yml'
+      - 'ci/**'
+      - 'frontend/src/CookieApp.tsx'
+      - 'frontend/interactive-tests/**'
+      - 'frontend/playwright.interactive.config.ts'
+      - '.github/workflows/interactive-e2e.yml'
+      - 'backend/app/**'
+      - 'backend/migrations/**'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  isolated-https-demo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create temporary localhost-only TLS certificate
+        run: |
+          mkdir -p ci/tls
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
+            -keyout ci/tls/key.pem -out ci/tls/cert.pem \
+            -subj "/CN=localhost" \
+            -addext "subjectAltName=DNS:localhost"
+          chmod 600 ci/tls/key.pem
+      - name: Build isolated same-origin React/FastAPI and TLS edge
+        run: docker compose -f docker-compose.interactive-ci.yml up --build -d
+      - name: Wait for HTTPS readiness and database migrations
+        run: |
+          for attempt in $(seq 1 40); do
+            if curl -ksS --fail https://localhost:8443/ready >/dev/null; then exit 0; fi
+            sleep 3
+          done
+          docker compose -f docker-compose.interactive-ci.yml logs --no-color --tail=150
+          exit 1
+      - name: Provision fictional disposable demo accounts
+        run: |
+          docker compose -f docker-compose.interactive-ci.yml exec -T api python - <<'PY'
+          from app.main import SessionLocal, Account, User, password_hasher
+          from sqlalchemy import select
+          accounts = [
+              ("ci-alice@example.org", 100_000),
+              ("ci-bob@example.org", 0),
+          ]
+          with SessionLocal() as db:
+              for email, balance in accounts:
+                  assert db.scalar(select(User).where(User.email == email)) is None
+                  user = User(
+                      email=email,
+                      password_hash=password_hasher.hash("ci-password-only-not-for-real-users-123"),
+                  )
+                  db.add(user)
+                  db.flush()
+                  db.add(Account(user_id=user.id, balance_cents=balance))
+              db.commit()
+          print("CI-only accounts provisioned; balances are fictional.")
+          PY
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Playwright Chromium
+        working-directory: frontend
+        run: |
+          npm install --no-save @playwright/test
+          npx playwright install --with-deps chromium
+      - name: Verify interactive HTTPS browser journey
+        working-directory: frontend
+        run: npx playwright test --config=playwright.interactive.config.ts
+      - name: Confirm edge throttle rejects request bursts
+        run: |
+          python3 - <<'PY'
+          import concurrent.futures, json, ssl, urllib.error, urllib.request
+          url = "https://localhost:8443/browser/session"
+          ctx = ssl._create_unverified_context() # ephemeral localhost-only CI certificate
+          payload = json.dumps({
+              "email": "unknown@example.org",
+              "password": "wrong-demo-password-123",
+          }).encode()
+          def probe(_):
+              req = urllib.request.Request(url, data=payload, method="POST", headers={
+                  "Origin": "https://localhost:8443",
+                  "Content-Type": "application/json",
+              })
+              try:
+                  with urllib.request.urlopen(req, context=ctx, timeout=15) as res:
+                      return res.status
+              except urllib.error.HTTPError as e:
+                  return e.code
+          with concurrent.futures.ThreadPoolExecutor(max_workers=24) as pool:
+              outcomes = list(pool.map(probe, range(45)))
+          assert 429 in outcomes, outcomes
+          print("Edge throttling confirmed HTTP 429 under burst; responses:", {x:outcomes.count(x) for x in sorted(set(outcomes))})
+          PY
+      - name: Restore compressed PostgreSQL backup into a separate database
+        run: |
+          docker compose -f docker-compose.interactive-ci.yml exec -T db \
+            pg_dump -U ledgerflow --format=custom ledgerflow > /tmp/ledgerflow_interactive_ci.dump
+          test -s /tmp/ledgerflow_interactive_ci.dump
+          docker compose -f docker-compose.interactive-ci.yml exec -T db \
+            createdb -U ledgerflow ledgerflow_restore_ci
+          cat /tmp/ledgerflow_interactive_ci.dump | docker compose -f docker-compose.interactive-ci.yml exec -T db \
+            pg_restore -U ledgerflow --no-owner --no-acl -d ledgerflow_restore_ci
+          original=$(docker compose -f docker-compose.interactive-ci.yml exec -T db \
+            psql -U ledgerflow -d ledgerflow -Atc "SELECT COUNT(*) || ':' || COALESCE(SUM(balance_cents),0) FROM accounts")
+          restored=$(docker compose -f docker-compose.interactive-ci.yml exec -T db \
+            psql -U ledgerflow -d ledgerflow_restore_ci -Atc "SELECT COUNT(*) || ':' || COALESCE(SUM(balance_cents),0) FROM accounts")
+          test "$original" = "$restored"
+          journal=$(docker compose -f docker-compose.interactive-ci.yml exec -T db \
+            psql -U ledgerflow -d ledgerflow_restore_ci -Atc "SELECT COALESCE(SUM(delta_cents),0) FROM journal_entries")
+          test "$journal" = "0"
+          echo "Restore verified: $restored accounts:balance checksum, journal net zero"
+      - name: Collect diagnostics on failure
+        if: failure()
+        run: docker compose -f docker-compose.interactive-ci.yml logs --no-color --tail=150
+      - name: Remove synthetic database, temporary credentials and certificates
+        if: always()
+        run: |
+          docker compose -f docker-compose.interactive-ci.yml down --volumes --remove-orphans
+          rm -f ci/tls/key.pem ci/tls/cert.pem /tmp/ledgerflow_interactive_ci.dump
