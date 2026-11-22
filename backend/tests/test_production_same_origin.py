@@ -22,8 +22,8 @@ from provision_demo_account import provision_demo_user
 
 def test_https_same_origin_login_transfer_logout_and_server_rendered_ui():
     with SessionLocal() as db:
-        alice = provision_demo_user(db, "interactive-alice@example.invalid", "only-for-isolated-ci-123")
-        bob = provision_demo_user(db, "interactive-bob@example.invalid", "only-for-isolated-ci-123")
+        alice = provision_demo_user(db, "interactive-alice@example.org", "only-for-isolated-ci-123")
+        bob = provision_demo_user(db, "interactive-bob@example.org", "only-for-isolated-ci-123")
         account = db.scalar(select(Account).join(User).where(User.email == alice))
         account.balance_cents = 150_000  # CI fixture only, not exposed as funding endpoint
         db.commit()
