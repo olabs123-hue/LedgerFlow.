@@ -63,3 +63,16 @@ Consult each latest workflow result; existence of a job does not establish a pas
 - Included the audit regression suite in backend CI. Confirm latest passing run before treating the updated code as validated.
 - **Current limitations:** These are application-level structured events, not a complete audit trail with persistent, tamper-evident storage and retention. Standard server/proxy access and error logs can have separate logging rules; audit their configuration before enabling real interactive public use. IP-based rate limiting/WAF, secure same-origin browser sessions, backups, recovery drills, comprehensive threat modeling and manual penetration tests remain outstanding.
 - **Rollout control:** The Render staging API has automatic Git deployments disabled, so these source commits are **not** yet applied to the live staging service. Keep `PUBLIC_API_READONLY=true`; do not enable `ALLOW_LIVE_API`.
+
+
+## Cookie-session prototype (Phase 1, November 2026)
+
+Cookie authentication is available in local/test mode through the new routes: `POST /browser/session`, `GET /browser/session`, `GET /browser/me`, `GET /browser/transfers`, `POST /browser/transfers`, and `POST /browser/logout`.
+
+- The server sets the signed access token in an **HttpOnly, SameSite=Strict** cookie; production mode additionally sets **Secure**. The browser-session login response exposes a session-bound HMAC CSRF proof, but **never the JWT**.
+- State-changing browser routes require the exact configured `Origin` and the session-bound `X-CSRF-Token` proof. Logout persists token revocation using the existing database table. Browser transfers retain the original transaction locks and idempotency handling.
+- Dedicated tests verify invalid origins/CSRF, cookie properties, sign-in, transfer, sign-out, revoked cookie reuse, and bearer-session independence.
+- The existing public staging API is **read-only** and blocks all these new routes. It has not been turned into an interactive public service.
+- **Next release gates:** provide a true same-origin frontend/API topology and in-memory CSRF handling; carefully review proxy and CORS deployment settings; implement a trusted per-client IP rate limit at the edge; harden session renewal, lifetime/rotation and logout-all behavior; implement invitation-only account provisioning; complete ongoing audit monitoring, backups and recovery; and verify everything against staging before opening the financial endpoints.
+
+Cookie authentication is an engineering prototype, **not a certification of complete production session security**. Keep `PUBLIC_API_READONLY=true` in Render.
