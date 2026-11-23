@@ -76,15 +76,19 @@ export default function CookieApp(){
     }catch(e){setError((e as Error).message);}finally{setLoading(false);}
   }
 
-  async function signOut(){
+  async function signOut(allDevices=false){
     setLoading(true);setError('');
+    let confirmed=false;
     try{
-      await browserCall<{message:string}>('/logout','POST',undefined,csrf);
+      await browserCall<{message:string}>(allDevices?'/logout-all':'/logout','POST',undefined,csrf);
+      confirmed=true;
     }catch{
-      setError('The server could not confirm session revocation. Close this browser and contact the demo operator.');
+      setError('The server could not confirm session revocation. Contact the demo operator.');
     }finally{
       setCsrf('');setProfile(null);setHistory([]);setPassword('');setLoading(false);
-      setStatus('Signed out of this browser.');
+      setStatus(confirmed
+        ? allDevices?'Signed out of all devices.':'Signed out of this browser.'
+        : 'Session cleared locally; server-side revocation was not confirmed.');
     }
   }
 
@@ -113,7 +117,7 @@ export default function CookieApp(){
     </aside>
     <main>
       <header><div><div className="eyebrow">SIMULATION / SECURITY</div><h1>LedgerFlow browser demo</h1><p className="muted">A same-origin interface using HttpOnly session cookies and CSRF checks.</p></div>
-        {profile&&<button className="soft" disabled={loading} onClick={()=>void signOut()}><LogOut size={16}/> Sign out</button>}
+        {profile&&<div className="headeractions"><button className="soft" disabled={loading} onClick={()=>void signOut(true)}>Sign out all devices</button><button className="soft" disabled={loading} onClick={()=>void signOut()}><LogOut size={16}/> Sign out</button></div>}
       </header>
       <div className="banner"><ShieldCheck size={18}/> <span><strong>Demo system.</strong> No real payments. Access is restricted to invited fictional demo accounts.</span></div>
       {status&&<p className="success">{status}</p>}
