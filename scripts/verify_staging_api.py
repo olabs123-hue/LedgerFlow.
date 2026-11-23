@@ -77,6 +77,7 @@ def main():
         ("POST", "/browser/session"),
         ("POST", "/browser/transfers"),
         ("POST", "/browser/logout"),
+        ("POST", "/browser/logout-all"),
     )
     request_ids = set()
     for method, path in blocked:
