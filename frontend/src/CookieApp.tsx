@@ -117,7 +117,7 @@ export default function CookieApp(){
     </aside>
     <main>
       <header><div><div className="eyebrow">SIMULATION / SECURITY</div><h1>LedgerFlow browser demo</h1><p className="muted">A same-origin interface using HttpOnly session cookies and CSRF checks.</p></div>
-        {profile&&<div className="headeractions"><button className="soft" disabled={loading} onClick={()=>void signOut(true)}>Sign out all devices</button><button className="soft" disabled={loading} onClick={()=>void signOut()}><LogOut size={16}/> Sign out</button></div>}
+        {profile&&<div className="headeractions"><button className="soft" disabled={loading} onClick={()=>void signOut(true)}>End all device sessions</button><button className="soft" disabled={loading} onClick={()=>void signOut()}><LogOut size={16}/> Sign out</button></div>}
       </header>
       <div className="banner"><ShieldCheck size={18}/> <span><strong>Demo system.</strong> No real payments. Access is restricted to invited fictional demo accounts.</span></div>
       {status&&<p className="success">{status}</p>}
