@@ -1,4 +1,4 @@
-"""Verify the read-only LedgerFlow public staging API from a remote CI runner.
+"""Verify the read-only LedgerFlow public staging API from a remote CI runner.\n\nRecheck after migration 0007: account-wide session revocation must remain inaccessible.
 
 This intentionally DOES NOT authenticate or create a user. All POST requests must be
 blocked before reaching handlers. Use only against the configured staging service.
