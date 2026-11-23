@@ -22,7 +22,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, EmailStr, Field
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError, VerificationError
-from sqlalchemy import BigInteger, CheckConstraint, DateTime, ForeignKey, String, UniqueConstraint, case, create_engine, delete, select, text
+from sqlalchemy import BigInteger, CheckConstraint, DateTime, ForeignKey, String, UniqueConstraint, case, create_engine, delete, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, sessionmaker
@@ -75,6 +75,7 @@ class User(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(255))
+    session_version: Mapped[int] = mapped_column(default=0, nullable=False)
     account: Mapped["Account"] = relationship(back_populates="user", uselist=False)
 
 class Account(Base):
@@ -299,6 +300,8 @@ def get_user(token: Annotated[HTTPAuthorizationCredentials, Depends(auth_scheme)
         if not jti or db.get(RevokedToken, jti) is not None:
             raise HTTPException(401, "Invalid or revoked token")
         user = db.get(User, int(payload["sub"]))
+        if user is not None and int(payload.get("sv", 0)) != user.session_version:
+            raise HTTPException(401, "Session has been revoked")
     except (jwt.PyJWTError, ValueError, TypeError, KeyError):
         user = None
     if user is None:
@@ -359,6 +362,7 @@ def login(body: Credentials, db: Annotated[Session, Depends(get_db)]):
     db.commit()
     token = jwt.encode({
         "sub": str(user.id),
+        "sv": user.session_version,
         "jti": secrets.token_urlsafe(24),
         "exp": datetime.now(timezone.utc) + timedelta(hours=1 if APP_ENV == "production" else 8),
     }, SECRET, algorithm="HS256")
@@ -499,8 +503,8 @@ def get_browser_user(
         user = db.get(User, int(claims["sub"]))
     except (ValueError, TypeError):
         user = None
-    if user is None:
-        raise HTTPException(401, "Invalid browser session")
+    if user is None or int(claims.get("sv", 0)) != user.session_version:
+        raise HTTPException(401, "Invalid or revoked browser session")
     return user
 
 
@@ -573,6 +577,26 @@ def browser_logout(
     db.commit()
     response.delete_cookie(COOKIE_NAME, path="/", samesite="strict", secure=APP_ENV == "production", httponly=True)
     return {"message": "Signed out"}
+
+
+@app.post("/browser/logout-all")
+def browser_logout_all(
+    request: Request, response: Response,
+    user: Annotated[User, Depends(get_browser_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    """Invalidate all cookies and bearer sessions on every device for this account."""
+    claims = _browser_claims(request)
+    _verify_browser_csrf(request, claims)
+    # Atomic increment avoids concurrent requests losing an account-wide revocation.
+    db.execute(
+        update(User)
+        .where(User.id == user.id)
+        .values(session_version=User.session_version + 1)
+    )
+    db.commit()
+    response.delete_cookie(COOKIE_NAME, path="/", samesite="strict", secure=APP_ENV == "production", httponly=True)
+    return {"message": "All sessions signed out"}
 
 
 # Optional same-origin SPA. Only a production interactive build may reach these
