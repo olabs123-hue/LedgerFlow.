@@ -28,6 +28,7 @@ EVENTS = {
     ("POST", "/demo/credit"): "demo.credit",
     ("POST", "/browser/session"): "browser.login",
     ("POST", "/browser/logout"): "browser.logout",
+    ("POST", "/browser/logout-all"): "browser.logout_all",
     ("POST", "/browser/transfers"): "browser.transfer",
     ("GET", "/browser/session"): "browser.session",
     ("GET", "/browser/me"): "browser.account",
