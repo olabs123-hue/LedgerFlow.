@@ -41,5 +41,6 @@ def test_production_disables_public_registration_funding_and_docs():
         assert client.post("/browser/session").status_code == 404
         assert client.post("/browser/transfers").status_code == 404
         assert client.post("/browser/logout").status_code == 404
+        assert client.post("/browser/logout-all").status_code == 404
         assert client.post("/demo/credit").status_code == 404
         # Exercise login-throttling only in a separate, nonpublic production-mode test.
