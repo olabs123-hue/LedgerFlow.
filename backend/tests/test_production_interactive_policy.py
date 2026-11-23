@@ -24,6 +24,7 @@ def test_interactive_mode_hides_all_legacy_bearer_and_funding_routes():
         assert client.get("/ready").status_code == 200
         # Cookie endpoints remain present, but reject unauthenticated requests.
         assert client.get("/browser/me").status_code == 401
+        assert client.post("/browser/logout-all").status_code == 401
         assert client.get("/browser/session").status_code == 401
         assert client.post("/browser/session",
             json={"email": "nobody@example.org", "password": "long-unknown-password"}
